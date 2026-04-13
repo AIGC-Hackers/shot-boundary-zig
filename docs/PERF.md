@@ -74,7 +74,29 @@ cargo run --release --features cli --bin transnetv2-rs -- decode-smoke assets/33
 }
 ```
 
-结论很直接：Rust 输出已经和官方 TensorFlow Python 参考对齐，但当前 Candle CPU 推理明显慢于 TensorFlow。后续优化应优先看受限 Conv3D 的 reshape/Conv1D/Conv2D 路径和 Candle CPU kernel，而不是 decode、windowing 或 scene postprocess。
+结论很直接：Rust Candle 输出已经和官方 TensorFlow Python 参考对齐，但 Candle CPU 推理明显慢于 TensorFlow。后续 macOS 主线不继续挖 Candle，改走 MLX。
+
+## MLX 后端结论
+
+2026-04-14 本地 5-run MLX gate：
+
+```json
+{
+  "passed": true,
+  "scene_count": 57,
+  "single_frame_max_abs_diff": 9.547364807072078e-7,
+  "many_hot_max_abs_diff": 1.0672409057610466e-6,
+  "python_tensorflow_mean_fps": 126.12884579960185,
+  "rust_candle_mean_fps": 36.54348241655181,
+  "rust_mlx_mean_fps": 338.3118280612795,
+  "rust_mlx_vs_tensorflow_speedup": 2.682271655754321,
+  "rust_mlx_vs_candle_speedup": 9.257788412306496,
+  "rust_mlx_mean_total_ms": 8730.4467502,
+  "rust_mlx_mean_inference_ms": 7847.7096678
+}
+```
+
+关键实现细节：不要用通用 MLX Conv3D 作为性能主路径。它 correctness 能过，但 5-run 均值约 `115 FPS`，低于 TensorFlow。当前 MLX 实现把受限 3D 卷积拆成 `conv2d (1,3,3)` + `conv1d (3,1,1)`，并把 MLX 默认 window batch 设为 `2`；这个组合通过了 `--require-python-fps` gate。
 
 ## Experimental Window Batching
 

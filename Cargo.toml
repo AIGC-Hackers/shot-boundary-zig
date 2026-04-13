@@ -13,6 +13,7 @@ candle-core = { version = "0.10.2", optional = true }
 candle-nn = { version = "0.10.2", optional = true }
 clap = { version = "4.6.0", features = ["derive"], optional = true }
 ffmpeg-next = { version = "8.1.0", optional = true }
+mlx-rs = { version = "0.25.3", features = ["safetensors"], optional = true }
 safetensors = { version = "0.7.0", optional = true }
 serde_json = { version = "1.0.149", optional = true }
 
@@ -20,6 +21,8 @@ serde_json = { version = "1.0.149", optional = true }
 default = []
 candle = ["dep:candle-core", "dep:candle-nn", "dep:safetensors"]
 cli = ["dep:clap", "dep:serde_json", "candle", "video-io"]
+cli-mlx = ["cli", "mlx"]
+mlx = ["dep:mlx-rs"]
 video-io = ["dep:ffmpeg-next"]
 
 [[bin]]

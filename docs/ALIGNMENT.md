@@ -2,7 +2,7 @@
 
 日期：2026-04-13
 
-目标是在同一台机器上比较官方 TensorFlow Python 版本和 Rust Candle 版本：
+目标是在同一台机器上比较官方 TensorFlow Python 版本和 Rust MLX 版本：
 
 - decode checksum 必须一致。
 - scene ranges 必须完全一致。
@@ -29,33 +29,49 @@ uv run --with tensorflow==2.16.2 --with numpy \
   --runs 5
 ```
 
-## 3. 运行 Rust Candle 版本
+## 3. 运行 Rust MLX 版本
 
 ```bash
-cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4 \
+cargo run --release --features cli-mlx --bin transnetv2-rs -- segment assets/333.mp4 \
   --weights target/models/transnetv2.safetensors \
+  --backend mlx \
   --runs 5 \
-  --format json > target/reports/rust-segment.json
+  --format json > target/reports/rust-mlx-segment-batch2-runs5.json
 ```
 
 ## 4. 生成对齐报告
 
+MLX 作为候选后端必须同时超过 Candle baseline 和官方 TensorFlow Python FPS：
+
+如果还没有 Candle baseline，先生成一次：
+
 ```bash
-python3 scripts/compare_segment_outputs.py \
+cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4 \
+  --weights target/models/transnetv2.safetensors \
+  --backend candle \
+  --runs 5 \
+  --format json > target/reports/rust-segment.json
+```
+
+```bash
+uv run python scripts/evaluate_runtime_candidate.py \
   --python target/reports/python-reference.json \
-  --rust target/reports/rust-segment.json \
-  --output-json target/reports/alignment.json \
-  --output-md target/reports/alignment.md
+  --baseline-rust target/reports/rust-segment.json \
+  --candidate target/reports/rust-mlx-segment-batch2-runs5.json \
+  --candidate-name rust-mlx-batch2-runs5 \
+  --require-python-fps \
+  --output-json target/reports/runtime-candidate-mlx-batch2-runs5.json \
+  --output-md target/reports/runtime-candidate-mlx-batch2-runs5.md
 ```
 
 如果这个命令返回非零退出码，不要接 `lens`。先看报告里的 `checksums_equal`、`scenes_equal`、`single_frame.max_abs_diff` 和 `many_hot.max_abs_diff`。
 
 ## 5. 评估候选 Runtime
 
-如果新增 CoreML、ONNX Runtime、Accelerate 或自定义 kernel 路径，先让候选路径输出同样的标准 JSON，再运行：
+如果新增 Linux/CUDA runtime 或自定义 kernel 路径，先让候选路径输出同样的标准 JSON，再运行同一个 gate：
 
 ```bash
-python3 scripts/evaluate_runtime_candidate.py \
+uv run python scripts/evaluate_runtime_candidate.py \
   --python target/reports/python-reference.json \
   --baseline-rust target/reports/rust-segment.json \
   --candidate target/reports/candidate-runtime.json \

@@ -6,6 +6,12 @@ use std::time::Instant;
 use candle_core::Device;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
+#[cfg(feature = "mlx")]
+use transnetv2_rs::mlx_model::MlxTransNetV2;
+#[cfg(feature = "mlx")]
+use transnetv2_rs::mlx_segment::{
+    DEFAULT_MLX_WINDOW_BATCH_SIZE, segment_video_with_options as mlx_segment_video_with_options,
+};
 use transnetv2_rs::model::TransNetV2;
 use transnetv2_rs::segment::{
     DEFAULT_WINDOW_BATCH_SIZE, SegmentModelProfileSummary, SegmentOptions, SegmentPredictions,
@@ -57,6 +63,9 @@ enum Command {
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
 
+        #[arg(long, value_enum, default_value_t = SegmentBackend::Auto)]
+        backend: SegmentBackend,
+
         #[arg(long, default_value_t = DEFAULT_SCENE_THRESHOLD)]
         threshold: f32,
 
@@ -66,8 +75,8 @@ enum Command {
         #[arg(long)]
         max_frames: Option<usize>,
 
-        #[arg(long, default_value_t = DEFAULT_WINDOW_BATCH_SIZE)]
-        window_batch_size: usize,
+        #[arg(long)]
+        window_batch_size: Option<usize>,
 
         #[arg(long)]
         profile: bool,
@@ -78,6 +87,20 @@ enum Command {
 enum OutputFormat {
     Json,
     Txt,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SegmentBackend {
+    Auto,
+    Mlx,
+    Candle,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ResolvedSegmentBackend {
+    #[cfg(feature = "mlx")]
+    Mlx,
+    Candle,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -108,6 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             video,
             weights,
             format,
+            backend,
             threshold,
             runs,
             max_frames,
@@ -117,6 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let output = run_segment(
                 video,
                 weights,
+                backend,
                 threshold,
                 runs,
                 max_frames,
@@ -184,10 +209,71 @@ fn run_scenes(
 fn run_segment(
     video: PathBuf,
     weights: PathBuf,
+    backend: SegmentBackend,
     threshold: f32,
     runs: usize,
     max_frames: Option<usize>,
-    window_batch_size: usize,
+    window_batch_size: Option<usize>,
+    profile: bool,
+) -> Result<SegmentCliOutput, Box<dyn std::error::Error>> {
+    match resolve_segment_backend(backend)? {
+        #[cfg(feature = "mlx")]
+        ResolvedSegmentBackend::Mlx => run_segment_mlx(
+            video,
+            weights,
+            threshold,
+            runs,
+            max_frames,
+            window_batch_size,
+            profile,
+        ),
+        ResolvedSegmentBackend::Candle => run_segment_candle(
+            video,
+            weights,
+            threshold,
+            runs,
+            max_frames,
+            window_batch_size,
+            profile,
+        ),
+    }
+}
+
+fn resolve_segment_backend(
+    backend: SegmentBackend,
+) -> Result<ResolvedSegmentBackend, Box<dyn std::error::Error>> {
+    match backend {
+        SegmentBackend::Auto => {
+            #[cfg(feature = "mlx")]
+            {
+                Ok(ResolvedSegmentBackend::Mlx)
+            }
+            #[cfg(not(feature = "mlx"))]
+            {
+                Ok(ResolvedSegmentBackend::Candle)
+            }
+        }
+        SegmentBackend::Mlx => {
+            #[cfg(feature = "mlx")]
+            {
+                Ok(ResolvedSegmentBackend::Mlx)
+            }
+            #[cfg(not(feature = "mlx"))]
+            {
+                Err("MLX backend requires building with --features cli-mlx".into())
+            }
+        }
+        SegmentBackend::Candle => Ok(ResolvedSegmentBackend::Candle),
+    }
+}
+
+fn run_segment_candle(
+    video: PathBuf,
+    weights: PathBuf,
+    threshold: f32,
+    runs: usize,
+    max_frames: Option<usize>,
+    window_batch_size: Option<usize>,
     profile: bool,
 ) -> Result<SegmentCliOutput, Box<dyn std::error::Error>> {
     if runs == 0 {
@@ -199,6 +285,7 @@ fn run_segment(
         max_frames,
         ..DecodeSmokeOptions::default()
     };
+    let window_batch_size = window_batch_size.unwrap_or(DEFAULT_WINDOW_BATCH_SIZE);
     let mut run_outputs = Vec::with_capacity(runs);
 
     for run_index in 0..runs {
@@ -254,6 +341,91 @@ fn run_segment(
 
     Ok(SegmentCliOutput {
         implementation: "rust-candle",
+        video,
+        weights,
+        threshold,
+        environment: EnvironmentOutput::current(),
+        runs: run_outputs,
+        summary,
+    })
+}
+
+#[cfg(feature = "mlx")]
+fn run_segment_mlx(
+    video: PathBuf,
+    weights: PathBuf,
+    threshold: f32,
+    runs: usize,
+    max_frames: Option<usize>,
+    window_batch_size: Option<usize>,
+    profile: bool,
+) -> Result<SegmentCliOutput, Box<dyn std::error::Error>> {
+    if runs == 0 {
+        return Err("runs must be greater than zero".into());
+    }
+    if profile {
+        return Err("MLX backend does not support --profile yet".into());
+    }
+
+    let options = DecodeSmokeOptions {
+        max_frames,
+        ..DecodeSmokeOptions::default()
+    };
+    let window_batch_size = window_batch_size.unwrap_or(DEFAULT_MLX_WINDOW_BATCH_SIZE);
+    let mut run_outputs = Vec::with_capacity(runs);
+
+    for run_index in 0..runs {
+        let load_started_at = Instant::now();
+        let model = MlxTransNetV2::load_from_safetensors(&weights)?;
+        let load_model_ms = load_started_at.elapsed().as_secs_f64() * 1_000.0;
+        let report = mlx_segment_video_with_options(
+            &model,
+            &video,
+            options,
+            SegmentOptions {
+                threshold,
+                collect_model_profile: false,
+                window_batch_size,
+            },
+        )?;
+        let total_ms = load_model_ms + report.timings.total_ms;
+        let frames_per_second = if total_ms > 0.0 {
+            report.frame_count as f64 / (total_ms / 1_000.0)
+        } else {
+            0.0
+        };
+
+        run_outputs.push(SegmentRunOutput {
+            run_index,
+            source: report.source,
+            frame_count: report.frame_count,
+            target_width: report.target_width,
+            target_height: report.target_height,
+            checksum_fnv1a64: report.checksum_fnv1a64,
+            limited_by_max_frames: report.limited_by_max_frames,
+            predictions: report.predictions,
+            scenes: report
+                .scenes
+                .into_iter()
+                .map(SceneOutput::from_scene)
+                .collect(),
+            model_profile: None,
+            timings: SegmentRunTimings {
+                load_model_ms,
+                decode_ms: report.timings.decode_ms,
+                windowing_ms: report.timings.windowing_ms,
+                inference_ms: report.timings.inference_ms,
+                postprocess_ms: report.timings.postprocess_ms,
+                total_ms,
+            },
+            frames_per_second,
+        });
+    }
+
+    let summary = SegmentSummary::from_runs(&run_outputs);
+
+    Ok(SegmentCliOutput {
+        implementation: "rust-mlx",
         video,
         weights,
         threshold,

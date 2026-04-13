@@ -26,18 +26,19 @@
 - crate 骨架和依赖特性开关
 - `predictions_to_scenes` 纯后处理函数
 - `TransNetV2::load_from_safetensors` / `TransNetV2::forward`
+- `MlxTransNetV2::load_from_safetensors` / `MlxTransNetV2::forward`
 - `segment_frames` / `segment_video` 窗口化推理入口
-- CLI 工具：`inspect`、`decode-smoke`、`scenes`、`segment`
+- CLI 工具：`inspect`、`decode-smoke`、`scenes`、`segment --backend auto|mlx|candle`
 - 可行性评估文档：`docs/ASSESSMENT.md`
 - 当前视频解码压测基线：`docs/PERF.md`
 - 模型移植入口、权重导出脚本和本地对齐脚本：`docs/PORTING.md`、`docs/ALIGNMENT.md`
 - runtime/backend 替换准入流程：`docs/RUNTIME.md`
 
-`segment` 已经可以用于本地验证，但只有在 Python/Rust 对齐报告通过后，才应该接入 `lens`：
+macOS 主线现在使用 MLX；Candle 保留为 fallback 和数值定位路径。只有在 Python/Rust 对齐报告通过后，才应该接入 `lens`：
 
 1. 用官方 `inference-pytorch/convert_weights.py` 路径生成 PyTorch state dict。
 2. 导出为 safetensors，并固定权重命名。
-3. 用同一个视频对齐官方 TensorFlow Python 输出和 Rust Candle 输出。
+3. 用同一个视频对齐官方 TensorFlow Python 输出和 Rust MLX 输出。
 4. 报告 scenes 是否一致、prediction 误差和两边性能数据。
 
 ## CLI
@@ -46,15 +47,16 @@
 cargo run --features cli --bin transnetv2-rs -- inspect assets/333.mp4
 cargo run --release --features cli --bin transnetv2-rs -- decode-smoke assets/333.mp4 --runs 3
 cargo run --features cli --bin transnetv2-rs -- scenes video.predictions.txt --column 0 --threshold 0.5
-cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4 \
+cargo run --release --features cli-mlx --bin transnetv2-rs -- segment assets/333.mp4 \
   --weights target/models/transnetv2.safetensors \
   --runs 5 \
   --format json
 cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4 \
   --weights target/models/transnetv2.safetensors \
+  --backend candle \
   --runs 1 \
   --profile \
   --format json > target/reports/rust-profile.json
 ```
 
-`decode-smoke` 也有 `bench-decode` alias。它只统计视频解码并缩放到模型输入尺寸 `48x27 RGB` 的吞吐，不能代表最终模型推理速度。真正的端到端结论使用 `segment` 和 `scripts/compare_segment_outputs.py`。候选 runtime 或自定义 kernel 必须再通过 `scripts/evaluate_runtime_candidate.py`，并在需要替换默认路径时使用 `--require-python-fps`。
+`decode-smoke` 也有 `bench-decode` alias。它只统计视频解码并缩放到模型输入尺寸 `48x27 RGB` 的吞吐，不能代表最终模型推理速度。真正的端到端结论使用 `segment` 和 `scripts/evaluate_runtime_candidate.py`。`--features cli-mlx` 下 `--backend auto` 默认走 MLX，未指定 `--window-batch-size` 时 MLX 默认用 `2`，Candle 默认仍是 `1`。

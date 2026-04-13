@@ -1,15 +1,26 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "mlx")]
+pub mod mlx_model;
+#[cfg(feature = "mlx")]
+pub mod mlx_segment;
 #[cfg(feature = "candle")]
 pub mod model;
 mod scenes;
 #[cfg(feature = "candle")]
 pub mod segment;
+mod segment_types;
 #[cfg(feature = "video-io")]
 pub mod video;
 
 pub use scenes::{FrameIndex, Scene, SceneDetectionError, predictions_to_scenes};
+pub use segment_types::{
+    DEFAULT_WINDOW_BATCH_SIZE, SegmentFramesReport, SegmentFramesTimings,
+    SegmentModelProfileSummary, SegmentOptions, SegmentPredictions,
+};
+#[cfg(feature = "video-io")]
+pub use segment_types::{SegmentVideoReport, SegmentVideoTimings};
 
 pub const MODEL_INPUT_WIDTH: usize = 48;
 pub const MODEL_INPUT_HEIGHT: usize = 27;
