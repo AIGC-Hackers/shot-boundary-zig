@@ -75,3 +75,20 @@ cargo run --release --features cli --bin transnetv2-rs -- decode-smoke assets/33
 ```
 
 结论很直接：Rust 输出已经和官方 TensorFlow Python 参考对齐，但当前 Candle CPU 推理明显慢于 TensorFlow。后续优化应优先看受限 Conv3D 的 reshape/Conv1D/Conv2D 路径和 Candle CPU kernel，而不是 decode、windowing 或 scene postprocess。
+
+## Experimental Window Batching
+
+`segment --window-batch-size 2` 在当前机器上能把完整视频单次 Rust FPS 从约 36.5 提到约 41.4，但这个路径不能作为默认验收路径：
+
+```json
+{
+  "rust_candle_batch2_fps": 41.3992,
+  "rust_candle_batch2_total_ms": 71329.842208,
+  "rust_candle_batch2_inference_ms": 70492.052581,
+  "scenes_equal_to_python_tensorflow": true,
+  "single_frame_max_abs_diff": 0.010563135827789338,
+  "many_hot_max_abs_diff": 0.007771762146759009
+}
+```
+
+它说明 batch 维度能减少一部分调度开销，但 Candle CPU 的批处理卷积会改变浮点舍入路径，概率差异超过当前 `5e-4` 严格阈值。默认值保持 `1`，直到我们能证明 batch 路径同时满足 scene 一致和 probability 对齐。

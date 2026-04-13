@@ -13,6 +13,7 @@ use crate::{
 };
 
 const FRAME_BYTES: usize = MODEL_INPUT_WIDTH * MODEL_INPUT_HEIGHT * MODEL_INPUT_CHANNELS;
+pub const DEFAULT_WINDOW_BATCH_SIZE: usize = 1;
 
 #[derive(Debug, Error)]
 pub enum SegmentError {
@@ -42,6 +43,9 @@ pub enum SegmentError {
 
     #[error("frame buffer length {byte_len} is not divisible by frame size {frame_bytes}")]
     InvalidFrameBuffer { byte_len: usize, frame_bytes: usize },
+
+    #[error("window_batch_size must be greater than zero")]
+    InvalidWindowBatchSize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +66,7 @@ pub struct SegmentFramesTimings {
 pub struct SegmentOptions {
     pub threshold: f32,
     pub collect_model_profile: bool,
+    pub window_batch_size: usize,
 }
 
 impl Default for SegmentOptions {
@@ -69,6 +74,7 @@ impl Default for SegmentOptions {
         Self {
             threshold: DEFAULT_SCENE_THRESHOLD,
             collect_model_profile: false,
+            window_batch_size: DEFAULT_WINDOW_BATCH_SIZE,
         }
     }
 }
@@ -76,6 +82,8 @@ impl Default for SegmentOptions {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SegmentModelProfileSummary {
     pub window_count: usize,
+    pub batch_count: usize,
+    pub window_batch_size: usize,
     pub total_ms: f64,
     pub input_cast_ms: f64,
     pub sddcnn_ms: f64,
@@ -88,8 +96,9 @@ pub struct SegmentModelProfileSummary {
 }
 
 impl SegmentModelProfileSummary {
-    fn observe(&mut self, profile: &TransNetV2ForwardProfile) {
-        self.window_count += 1;
+    fn observe(&mut self, profile: &TransNetV2ForwardProfile, batch_size: usize) {
+        self.window_count += batch_size;
+        self.batch_count += 1;
         self.total_ms += profile.total_ms;
         self.input_cast_ms += profile.input_cast_ms;
         self.sddcnn_ms += profile.sddcnn_ms;
@@ -179,15 +188,23 @@ pub fn segment_frames_with_options(
     let mut model_profile = options
         .collect_model_profile
         .then(SegmentModelProfileSummary::default);
+    if options.window_batch_size == 0 {
+        return Err(SegmentError::InvalidWindowBatchSize);
+    }
+    if let Some(summary) = &mut model_profile {
+        summary.window_batch_size = options.window_batch_size;
+    }
+    let windows = window_source_indices(frame_count)?;
     let started_at = Instant::now();
 
-    for indices in window_source_indices(frame_count)? {
+    for window_batch in windows.chunks(options.window_batch_size) {
         let window_started_at = Instant::now();
-        let window = build_window(frames_rgb24, FRAME_BYTES, &indices);
+        let window = build_window_batch(frames_rgb24, FRAME_BYTES, window_batch);
+        let batch_size = window_batch.len();
         let input = Tensor::from_vec(
             window,
             (
-                1,
+                batch_size,
                 MODEL_WINDOW_FRAMES,
                 MODEL_INPUT_HEIGHT,
                 MODEL_INPUT_WIDTH,
@@ -200,7 +217,7 @@ pub fn segment_frames_with_options(
         let inference_started_at = Instant::now();
         let output = if let Some(summary) = &mut model_profile {
             let profiled = model.forward_profiled(&input)?;
-            summary.observe(&profiled.profile);
+            summary.observe(&profiled.profile, batch_size);
             profiled.output
         } else {
             model.forward(&input)?
@@ -356,14 +373,20 @@ fn window_source_indices(frame_count: usize) -> Result<Vec<Vec<usize>>, SegmentE
     Ok(windows)
 }
 
-fn build_window(frames_rgb24: &[u8], frame_bytes: usize, indices: &[usize]) -> Vec<u8> {
-    let mut window = Vec::with_capacity(indices.len() * frame_bytes);
-    for &index in indices {
-        let start = index * frame_bytes;
-        let end = start + frame_bytes;
-        window.extend_from_slice(&frames_rgb24[start..end]);
+fn build_window_batch(
+    frames_rgb24: &[u8],
+    frame_bytes: usize,
+    window_batch: &[Vec<usize>],
+) -> Vec<u8> {
+    let mut batch = Vec::with_capacity(window_batch.len() * MODEL_WINDOW_FRAMES * frame_bytes);
+    for indices in window_batch {
+        for &index in indices {
+            let start = index * frame_bytes;
+            let end = start + frame_bytes;
+            batch.extend_from_slice(&frames_rgb24[start..end]);
+        }
     }
-    window
+    batch
 }
 
 fn center_probabilities(logits: &Tensor) -> CandleResult<Vec<f32>> {

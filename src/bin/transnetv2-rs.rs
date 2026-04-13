@@ -8,7 +8,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use transnetv2_rs::model::TransNetV2;
 use transnetv2_rs::segment::{
-    SegmentModelProfileSummary, SegmentOptions, SegmentPredictions, segment_video_with_options,
+    DEFAULT_WINDOW_BATCH_SIZE, SegmentModelProfileSummary, SegmentOptions, SegmentPredictions,
+    segment_video_with_options,
 };
 use transnetv2_rs::video::{DecodeSmokeOptions, DecodeSmokeReport, decode_smoke, inspect_video};
 use transnetv2_rs::{DEFAULT_SCENE_THRESHOLD, Scene, predictions_to_scenes};
@@ -65,6 +66,9 @@ enum Command {
         #[arg(long)]
         max_frames: Option<usize>,
 
+        #[arg(long, default_value_t = DEFAULT_WINDOW_BATCH_SIZE)]
+        window_batch_size: usize,
+
         #[arg(long)]
         profile: bool,
     },
@@ -107,9 +111,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             threshold,
             runs,
             max_frames,
+            window_batch_size,
             profile,
         } => {
-            let output = run_segment(video, weights, threshold, runs, max_frames, profile)?;
+            let output = run_segment(
+                video,
+                weights,
+                threshold,
+                runs,
+                max_frames,
+                window_batch_size,
+                profile,
+            )?;
             match format {
                 OutputFormat::Json => print_json(&output)?,
                 OutputFormat::Txt => print_segment_text(&output)?,
@@ -174,6 +187,7 @@ fn run_segment(
     threshold: f32,
     runs: usize,
     max_frames: Option<usize>,
+    window_batch_size: usize,
     profile: bool,
 ) -> Result<SegmentCliOutput, Box<dyn std::error::Error>> {
     if runs == 0 {
@@ -199,6 +213,7 @@ fn run_segment(
             SegmentOptions {
                 threshold,
                 collect_model_profile: profile,
+                window_batch_size,
             },
         )?;
         let total_ms = load_model_ms + report.timings.total_ms;

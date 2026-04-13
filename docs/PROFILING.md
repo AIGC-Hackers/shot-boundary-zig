@@ -16,6 +16,19 @@ cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4
 
 短冒烟可以加 `--max-frames 60`。
 
+可实验性地批量执行多个 windows：
+
+```bash
+cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4 \
+  --weights target/models/transnetv2.safetensors \
+  --runs 1 \
+  --window-batch-size 2 \
+  --profile \
+  --format json > target/reports/rust-profile-batch2.json
+```
+
+这个参数默认仍是 `1`。在当前 Candle CPU 路径上，`2` 能降低一部分调度开销，但会改变卷积批处理的浮点舍入路径；在完整视频上 scenes 仍一致，但 probability 的 `max_abs_diff` 会超过严格 `5e-4` 阈值，所以不能作为默认正确性路径。
+
 ## 字段
 
 `runs[].model_profile` 会汇总所有 100-frame windows 的模型内部耗时：
@@ -23,6 +36,8 @@ cargo run --release --features cli --bin transnetv2-rs -- segment assets/333.mp4
 - `input_cast_ms`
 - `sddcnn_ms`
 - `block_ms`
+- `batch_count`
+- `window_batch_size`
 - `flatten_ms`
 - `frame_similarity_ms`
 - `color_histograms_ms`
