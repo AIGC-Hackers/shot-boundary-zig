@@ -1,6 +1,9 @@
-/target
-/rust/target
-/.scratch
+.zig-cache/
+zig-out/
+externals/
+target/
+rust/target/
+.scratch/
 __pycache__/
 *.py[cod]
 *.safetensors

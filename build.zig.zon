@@ -1,0 +1,20 @@
+.{
+    .name = .transnetv2_zig,
+    .version = "0.0.0",
+    .fingerprint = 0xeb0dfc186b76aedd,
+    .dependencies = .{
+        .ziglint = .{
+            .url = "https://github.com/rockorager/ziglint/archive/refs/tags/v0.5.2.tar.gz",
+            .hash = "ziglint-0.5.2-t0bwL2FwBQC5i-ifhKKv2ls5jGXHShJpuNhFVhiU-Tt-",
+        },
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
