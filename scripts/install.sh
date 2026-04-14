@@ -114,7 +114,7 @@ print_success() {
     esac
 
     echo ""
-    echo "Verify: shot-boundary env"
+    echo "Verify: shot-boundary --help"
 }
 
 usage() {

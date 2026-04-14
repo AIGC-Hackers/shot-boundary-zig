@@ -1,0 +1,704 @@
+//! User-facing shot-boundary CLI.
+
+const std = @import("std");
+const builtin = @import("builtin");
+const clap = @import("clap");
+const cli_common = @import("cli_common.zig");
+const runtime_model = @import("runtime_model.zig");
+const runtime_segment = @import("runtime_segment.zig");
+const segment_core = @import("segment_core.zig");
+const spec = @import("spec");
+const time_util = @import("time_util.zig");
+const video = @import("video.zig");
+
+const EnvironmentOutput = cli_common.EnvironmentOutput;
+const OutputFormat = cli_common.OutputFormat;
+const default_scene_threshold: f32 = spec.default_scene_threshold;
+
+const usage =
+    \\usage:
+    \\  shot-boundary segment <video> [options]
+    \\
+    \\segment options:
+    \\  --model <autoshot|transnetv2> optional model family, default autoshot
+    \\  --weights <path>             optional model path; auto-resolved from install prefix
+    \\  --format <json|txt>          output format, default json
+    \\  --threshold <0..1>           scene threshold, default depends on model
+    \\  --runs <n>                   run count, must be > 0, default 1
+    \\  --max-frames <n>             optional decode limit, must be > 0
+    \\  --window-batch-size <n>      optional inference batch size, must be > 0
+    \\
+;
+
+const CliError = error{
+    MissingCommand,
+    UnknownCommand,
+    MissingVideo,
+    MissingValue,
+    DuplicateOption,
+    UnknownOption,
+    UnexpectedArgument,
+    InvalidFormat,
+    InvalidRuns,
+    InvalidMaxFrames,
+    InvalidWindowBatchSize,
+    InvalidThreshold,
+    InvalidModel,
+};
+
+const Command = union(enum) {
+    help,
+    segment: SegmentOptions,
+};
+
+pub const SegmentModel = enum {
+    autoshot,
+    transnetv2,
+
+    pub fn jsonStringify(self: SegmentModel, jw: *std.json.Stringify) std.json.Stringify.Error!void {
+        try jw.write(@tagName(self));
+    }
+
+    fn defaultThreshold(self: SegmentModel) f32 {
+        return switch (self) {
+            .autoshot => spec.autoshot_scene_threshold,
+            .transnetv2 => spec.transnetv2_scene_threshold,
+        };
+    }
+
+    fn defaultFilename(self: SegmentModel) []const u8 {
+        return switch (self) {
+            .autoshot => switch (builtin.os.tag) {
+                .macos => "autoshot.safetensors",
+                .linux => "autoshot.onnx",
+                else => "autoshot.model",
+            },
+            .transnetv2 => switch (builtin.os.tag) {
+                .macos => "transnetv2.safetensors",
+                .linux => "transnetv2.onnx",
+                else => "transnetv2.model",
+            },
+        };
+    }
+};
+
+const SegmentOptions = struct {
+    video: []const u8,
+    model: SegmentModel = .autoshot,
+    weights: ?[]const u8 = null,
+    format: OutputFormat = .json,
+    threshold: f32 = default_scene_threshold,
+    runs: usize = 1,
+    max_frames: ?usize = null,
+    window_batch_size: ?usize = null,
+};
+
+const segment_params = clap.parseParamsComptime(
+    \\-h, --help                   Display this help and exit.
+    \\    --model <model>...       Model family: autoshot or transnetv2.
+    \\    --weights <str>...       Optional platform model path.
+    \\    --format <format>...     Output format: json or txt.
+    \\    --threshold <f32>...     Scene threshold in [0, 1].
+    \\    --runs <usize>...        Run count, must be > 0.
+    \\    --max-frames <usize>...  Optional decode limit, must be > 0.
+    \\    --window-batch-size <usize>... Optional inference batch size, must be > 0.
+    \\<video>
+    \\<extra>...
+    \\
+);
+
+const segment_parsers = .{
+    .model = clap.parsers.string,
+    .str = clap.parsers.string,
+    .format = clap.parsers.string,
+    .f32 = clap.parsers.float(f32),
+    .usize = clap.parsers.int(usize, 10),
+    .video = clap.parsers.string,
+    .extra = clap.parsers.string,
+};
+
+const SegmentPredictionsOutput = struct {
+    single_frame: []const f32,
+    many_hot: []const f32,
+};
+
+const SegmentSourceOutput = struct {
+    path: []const u8,
+};
+
+const SegmentRunTimings = struct {
+    load_model_ms: f64,
+    decode_ms: f64,
+    windowing_ms: f64,
+    inference_ms: f64,
+    postprocess_ms: f64,
+    total_ms: f64,
+};
+
+const SegmentRunOutput = struct {
+    run_index: usize,
+    source: SegmentSourceOutput,
+    frame_count: usize,
+    target_width: usize,
+    target_height: usize,
+    checksum_fnv1a64: []const u8,
+    limited_by_max_frames: bool,
+    predictions: SegmentPredictionsOutput,
+    scenes: []const segment_core.Scene,
+    timings: SegmentRunTimings,
+    frames_per_second: f64,
+
+    fn deinit(self: SegmentRunOutput, allocator: std.mem.Allocator) void {
+        allocator.free(self.checksum_fnv1a64);
+        allocator.free(self.predictions.single_frame);
+        allocator.free(self.predictions.many_hot);
+        allocator.free(self.scenes);
+    }
+};
+
+const SegmentSummary = struct {
+    run_count: usize,
+    min_frames_per_second: f64,
+    max_frames_per_second: f64,
+    mean_frames_per_second: f64,
+    min_total_ms: f64,
+    max_total_ms: f64,
+    mean_total_ms: f64,
+    mean_load_model_ms: f64,
+    mean_decode_ms: f64,
+    mean_windowing_ms: f64,
+    mean_inference_ms: f64,
+    mean_postprocess_ms: f64,
+
+    fn fromRuns(runs: []const SegmentRunOutput) SegmentSummary {
+        var min_fps = std.math.inf(f64);
+        var max_fps = -std.math.inf(f64);
+        var sum_fps: f64 = 0.0;
+        var min_total_ms = std.math.inf(f64);
+        var max_total_ms = -std.math.inf(f64);
+        var sum_total_ms: f64 = 0.0;
+        var sum_load_model_ms: f64 = 0.0;
+        var sum_decode_ms: f64 = 0.0;
+        var sum_windowing_ms: f64 = 0.0;
+        var sum_inference_ms: f64 = 0.0;
+        var sum_postprocess_ms: f64 = 0.0;
+
+        for (runs) |run| {
+            min_fps = @min(min_fps, run.frames_per_second);
+            max_fps = @max(max_fps, run.frames_per_second);
+            sum_fps += run.frames_per_second;
+            min_total_ms = @min(min_total_ms, run.timings.total_ms);
+            max_total_ms = @max(max_total_ms, run.timings.total_ms);
+            sum_total_ms += run.timings.total_ms;
+            sum_load_model_ms += run.timings.load_model_ms;
+            sum_decode_ms += run.timings.decode_ms;
+            sum_windowing_ms += run.timings.windowing_ms;
+            sum_inference_ms += run.timings.inference_ms;
+            sum_postprocess_ms += run.timings.postprocess_ms;
+        }
+
+        const run_count_float: f64 = @floatFromInt(runs.len);
+        return .{
+            .run_count = runs.len,
+            .min_frames_per_second = min_fps,
+            .max_frames_per_second = max_fps,
+            .mean_frames_per_second = sum_fps / run_count_float,
+            .min_total_ms = min_total_ms,
+            .max_total_ms = max_total_ms,
+            .mean_total_ms = sum_total_ms / run_count_float,
+            .mean_load_model_ms = sum_load_model_ms / run_count_float,
+            .mean_decode_ms = sum_decode_ms / run_count_float,
+            .mean_windowing_ms = sum_windowing_ms / run_count_float,
+            .mean_inference_ms = sum_inference_ms / run_count_float,
+            .mean_postprocess_ms = sum_postprocess_ms / run_count_float,
+        };
+    }
+};
+
+const SegmentCliOutput = struct {
+    implementation: []const u8 = runtime_model.implementation,
+    video: []const u8,
+    model: SegmentModel,
+    weights: []const u8,
+    threshold: f32,
+    environment: EnvironmentOutput,
+    runs: []const SegmentRunOutput,
+    summary: SegmentSummary,
+};
+
+pub fn main() !void {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    const command = parseCli(allocator, args[1..]) catch |err| {
+        try writeCliError(err);
+        std.process.exit(2);
+    };
+
+    switch (command) {
+        .help => try writeUsage(),
+        .segment => |options| try runSegment(allocator, options),
+    }
+}
+
+fn parseCli(allocator: std.mem.Allocator, args: []const []const u8) CliError!Command {
+    if (args.len == 0) return error.MissingCommand;
+
+    if (std.mem.eql(u8, args[0], "help") or
+        std.mem.eql(u8, args[0], "--help") or
+        std.mem.eql(u8, args[0], "-h"))
+    {
+        if (args.len != 1) return error.UnexpectedArgument;
+        return .help;
+    }
+
+    if (std.mem.eql(u8, args[0], "segment")) {
+        return parseSegmentCommand(allocator, args[1..]);
+    }
+
+    return error.UnknownCommand;
+}
+
+fn parseSegmentCommand(allocator: std.mem.Allocator, args: []const []const u8) CliError!Command {
+    var iter: clap.args.SliceIterator = .{ .args = args };
+    var diag: clap.Diagnostic = .{};
+    var res = clap.parseEx(clap.Help, &segment_params, segment_parsers, &iter, .{
+        .diagnostic = &diag,
+        .allocator = allocator,
+        .assignment_separators = "=",
+    }) catch |err| return mapSegmentClapError(err, diag);
+    defer res.deinit();
+
+    if (res.args.help != 0) return .help;
+    if (res.args.help > 1) return error.DuplicateOption;
+    if (res.positionals[1].len != 0) return error.UnexpectedArgument;
+
+    const video_path = res.positionals[0] orelse return error.MissingVideo;
+    const model = try segmentModelOption(res.args.model);
+    const weights = try singleOptional([]const u8, res.args.weights);
+    const format = try outputFormatOption(res.args.format);
+    const threshold = try thresholdOption(res.args.threshold, model.defaultThreshold());
+    const runs = try positiveUsizeOption(res.args.runs, 1, error.InvalidRuns);
+    const max_frames = try positiveOptionalUsizeOption(@field(res.args, "max-frames"), error.InvalidMaxFrames);
+    const window_batch_size = try positiveOptionalUsizeOption(
+        @field(res.args, "window-batch-size"),
+        error.InvalidWindowBatchSize,
+    );
+
+    return .{
+        .segment = .{
+            .video = video_path,
+            .model = model,
+            .weights = weights,
+            .format = format,
+            .threshold = threshold,
+            .runs = runs,
+            .max_frames = max_frames,
+            .window_batch_size = window_batch_size,
+        },
+    };
+}
+
+fn singleOptional(comptime T: type, values: []const T) CliError!?T {
+    if (values.len == 0) return null;
+    if (values.len > 1) return error.DuplicateOption;
+    return values[0];
+}
+
+fn outputFormatOption(values: []const []const u8) CliError!OutputFormat {
+    const value = (try singleOptional([]const u8, values)) orelse return .json;
+    return std.meta.stringToEnum(OutputFormat, value) orelse error.InvalidFormat;
+}
+
+fn segmentModelOption(values: []const []const u8) CliError!SegmentModel {
+    const value = (try singleOptional([]const u8, values)) orelse return .autoshot;
+    return std.meta.stringToEnum(SegmentModel, value) orelse error.InvalidModel;
+}
+
+fn thresholdOption(values: []const f32, default_threshold: f32) CliError!f32 {
+    const threshold = (try singleOptional(f32, values)) orelse default_threshold;
+    if (!std.math.isFinite(threshold) or threshold < 0.0 or threshold > 1.0) return error.InvalidThreshold;
+    return threshold;
+}
+
+fn positiveUsizeOption(values: []const usize, default: usize, invalid: CliError) CliError!usize {
+    const value = (try singleOptional(usize, values)) orelse default;
+    if (value == 0) return invalid;
+    return value;
+}
+
+fn positiveOptionalUsizeOption(values: []const usize, invalid: CliError) CliError!?usize {
+    const value = (try singleOptional(usize, values)) orelse return null;
+    if (value == 0) return invalid;
+    return value;
+}
+
+fn mapSegmentClapError(err: anyerror, diag: clap.Diagnostic) CliError {
+    return switch (err) {
+        error.MissingValue => error.MissingValue,
+        error.InvalidArgument => if (diag.name.long != null or diag.name.short != null)
+            error.UnknownOption
+        else
+            error.UnexpectedArgument,
+        error.NameNotPartOfEnum => if (diagLongName(diag, "format"))
+            error.InvalidFormat
+        else
+            error.InvalidModel,
+        error.InvalidCharacter, error.Overflow => if (diagLongName(diag, "threshold"))
+            error.InvalidThreshold
+        else if (diagLongName(diag, "runs"))
+            error.InvalidRuns
+        else if (diagLongName(diag, "max-frames"))
+            error.InvalidMaxFrames
+        else if (diagLongName(diag, "window-batch-size"))
+            error.InvalidWindowBatchSize
+        else
+            error.UnexpectedArgument,
+        else => error.UnexpectedArgument,
+    };
+}
+
+fn diagLongName(diag: clap.Diagnostic, expected: []const u8) bool {
+    const actual = diag.name.long orelse return false;
+    return std.mem.eql(u8, actual, expected);
+}
+
+fn defaultModelFilename(model: SegmentModel) []const u8 {
+    return model.defaultFilename();
+}
+
+fn defaultModelPath(allocator: std.mem.Allocator, model: SegmentModel) ![]const u8 {
+    const exe_dir = try std.fs.selfExeDirPathAlloc(allocator);
+    defer allocator.free(exe_dir);
+    // Binary lives at {prefix}/bin/; models live at {prefix}/models/.
+    const prefix_dir = std.fs.path.dirname(exe_dir) orelse exe_dir;
+    return std.fs.path.join(allocator, &.{ prefix_dir, "models", defaultModelFilename(model) });
+}
+
+fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
+    const window_batch_size = options.window_batch_size orelse runtime_segment.default_window_batch_size;
+    var weights_owned = false;
+    const weights = if (options.weights) |path| path else blk: {
+        weights_owned = true;
+        break :blk try defaultModelPath(allocator, options.model);
+    };
+    defer if (weights_owned) allocator.free(weights);
+
+    var runs: std.ArrayList(SegmentRunOutput) = .empty;
+    defer {
+        for (runs.items) |run| run.deinit(allocator);
+        runs.deinit(allocator);
+    }
+
+    for (0..options.runs) |run_index| {
+        const run = switch (options.model) {
+            .autoshot => try runSegmentWithModel(
+                runtime_model.AutoShot,
+                allocator,
+                options,
+                weights,
+                run_index,
+                window_batch_size,
+            ),
+            .transnetv2 => try runSegmentWithModel(
+                runtime_model.TransNetV2,
+                allocator,
+                options,
+                weights,
+                run_index,
+                window_batch_size,
+            ),
+        };
+        try runs.append(allocator, run);
+    }
+
+    const output: SegmentCliOutput = .{
+        .video = options.video,
+        .model = options.model,
+        .weights = weights,
+        .threshold = options.threshold,
+        .environment = .current(),
+        .runs = runs.items,
+        .summary = .fromRuns(runs.items),
+    };
+
+    switch (options.format) {
+        .json => try cli_common.writeJson(output),
+        .txt => try writeSegmentText(output),
+    }
+}
+
+fn runSegmentWithModel(
+    comptime Model: type,
+    allocator: std.mem.Allocator,
+    options: SegmentOptions,
+    weights: []const u8,
+    run_index: usize,
+    window_batch_size: usize,
+) !SegmentRunOutput {
+    const load_started_at = try std.time.Instant.now();
+    var model = try Model.load(allocator, weights);
+    defer model.deinit();
+    const load_model_ms = time_util.elapsedMs(load_started_at);
+
+    const decoded = try video.decodeRgb24(allocator, options.video, .{ .max_frames = options.max_frames });
+    defer decoded.deinit(allocator);
+
+    const report = try runtime_segment.segmentFrames(allocator, &model, decoded.data, .{
+        .threshold = options.threshold,
+        .window_batch_size = window_batch_size,
+    });
+    var report_owned = true;
+    errdefer if (report_owned) report.deinit(allocator);
+
+    const total_ms = load_model_ms + decoded.elapsed_ms + report.timings.total_ms;
+    const frames_per_second = if (total_ms > 0.0)
+        @as(f64, @floatFromInt(report.frame_count)) / (total_ms / 1_000.0)
+    else
+        0.0;
+
+    const checksum = try allocator.dupe(u8, &decoded.checksum_fnv1a64);
+    var checksum_owned = true;
+    errdefer if (checksum_owned) allocator.free(checksum);
+
+    const run: SegmentRunOutput = .{
+        .run_index = run_index,
+        .source = .{ .path = decoded.path },
+        .frame_count = report.frame_count,
+        .target_width = decoded.target_width,
+        .target_height = decoded.target_height,
+        .checksum_fnv1a64 = checksum,
+        .limited_by_max_frames = decoded.limited_by_max_frames,
+        .predictions = .{
+            .single_frame = report.predictions.single_frame,
+            .many_hot = report.predictions.many_hot,
+        },
+        .scenes = report.scenes,
+        .timings = .{
+            .load_model_ms = load_model_ms,
+            .decode_ms = decoded.elapsed_ms,
+            .windowing_ms = report.timings.windowing_ms,
+            .inference_ms = report.timings.inference_ms,
+            .postprocess_ms = report.timings.postprocess_ms,
+            .total_ms = total_ms,
+        },
+        .frames_per_second = frames_per_second,
+    };
+    report_owned = false;
+    checksum_owned = false;
+    return run;
+}
+
+fn writeSegmentText(output: SegmentCliOutput) !void {
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout = &stdout_writer.interface;
+    const last_run = output.runs[output.runs.len - 1];
+
+    try stdout.print("implementation: {s}\n", .{output.implementation});
+    try stdout.print("video: {s}\n", .{output.video});
+    try stdout.print("model: {s}\n", .{@tagName(output.model)});
+    try stdout.print("weights: {s}\n", .{output.weights});
+    try stdout.print("threshold: {d}\n", .{output.threshold});
+    try stdout.print("runs: {d}\n", .{output.runs.len});
+    try stdout.print("frame_count: {d}\n", .{last_run.frame_count});
+    try stdout.print("checksum_fnv1a64: {s}\n", .{last_run.checksum_fnv1a64});
+    try stdout.print("mean_frames_per_second: {d:.6}\n", .{output.summary.mean_frames_per_second});
+    try stdout.print("mean_total_ms: {d:.6}\n", .{output.summary.mean_total_ms});
+    try stdout.print("zig_version: {s}\n", .{output.environment.zig_version});
+    try stdout.print("target: {s}-{s}-{s}\n", .{
+        output.environment.arch,
+        output.environment.os,
+        output.environment.abi,
+    });
+    try stdout.writeAll("\n# scenes\n");
+    for (last_run.scenes) |scene| {
+        try stdout.print("{d} {d}\n", .{ scene.start, scene.end });
+    }
+    try stdout.writeAll("\n# predictions\nframe single_frame many_hot\n");
+    for (last_run.predictions.single_frame, last_run.predictions.many_hot, 0..) |single, many, index| {
+        try stdout.print("{d} {d:.8} {d:.8}\n", .{ index, single, many });
+    }
+    try stdout.flush();
+}
+
+fn writeUsage() !void {
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+
+    try stdout_writer.interface.writeAll(usage);
+    try stdout_writer.interface.flush();
+}
+
+fn writeCliError(err: CliError) !void {
+    var stderr_buf: [4096]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    const stderr = &stderr_writer.interface;
+
+    try stderr.print("error: {s}\n\n", .{cliErrorMessage(err)});
+    try stderr.writeAll(usage);
+    try stderr.flush();
+}
+
+fn cliErrorMessage(err: CliError) []const u8 {
+    return switch (err) {
+        error.MissingCommand => "missing command",
+        error.UnknownCommand => "unknown command",
+        error.MissingVideo => "segment requires a video path",
+        error.MissingValue => "option requires a value",
+        error.DuplicateOption => "duplicate option",
+        error.UnknownOption => "unknown option",
+        error.UnexpectedArgument => "unexpected positional argument",
+        error.InvalidFormat => "format must be json or txt",
+        error.InvalidRuns => "runs must be a positive integer",
+        error.InvalidMaxFrames => "max-frames must be a positive integer",
+        error.InvalidWindowBatchSize => "window-batch-size must be a positive integer",
+        error.InvalidThreshold => "threshold must be a finite probability in [0, 1]",
+        error.InvalidModel => "model must be autoshot or transnetv2",
+    };
+}
+
+test "parse segment command from README shape" {
+    const command = try parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--weights",
+        "models/autoshot.safetensors",
+        "--runs",
+        "5",
+        "--format",
+        "json",
+    });
+
+    const options = command.segment;
+    try std.testing.expectEqualStrings("assets/333.mp4", options.video);
+    try std.testing.expectEqual(SegmentModel.autoshot, options.model);
+    try std.testing.expectEqualStrings("models/autoshot.safetensors", options.weights.?);
+    try std.testing.expectEqual(@as(usize, 5), options.runs);
+    try std.testing.expectEqual(OutputFormat.json, options.format);
+    try std.testing.expectEqual(default_scene_threshold, options.threshold);
+}
+
+test "parse segment accepts runtime options" {
+    const command = try parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--model",
+        "transnetv2",
+        "--weights",
+        "models/transnetv2.safetensors",
+        "--format",
+        "txt",
+        "--threshold",
+        "0.35",
+        "--runs",
+        "2",
+        "--max-frames",
+        "100",
+        "--window-batch-size",
+        "2",
+    });
+
+    const options = command.segment;
+    try std.testing.expectEqual(SegmentModel.transnetv2, options.model);
+    try std.testing.expectEqual(OutputFormat.txt, options.format);
+    try std.testing.expectEqual(@as(f32, 0.35), options.threshold);
+    try std.testing.expectEqual(@as(usize, 2), options.runs);
+    try std.testing.expectEqual(@as(?usize, 100), options.max_frames);
+    try std.testing.expectEqual(@as(?usize, 2), options.window_batch_size);
+}
+
+test "parse segment uses platform default model when weights are omitted" {
+    const command = try parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+    });
+    const options = command.segment;
+
+    try std.testing.expectEqualStrings("assets/333.mp4", options.video);
+    try std.testing.expectEqual(SegmentModel.autoshot, options.model);
+    try std.testing.expect(options.weights == null);
+    try std.testing.expectEqual(spec.autoshot_scene_threshold, options.threshold);
+}
+
+test "parse segment uses model-specific default threshold" {
+    const command = try parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--model",
+        "transnetv2",
+    });
+    const options = command.segment;
+
+    try std.testing.expectEqual(SegmentModel.transnetv2, options.model);
+    try std.testing.expectEqual(spec.transnetv2_scene_threshold, options.threshold);
+}
+
+test "default model filename is model-specific runtime artifact" {
+    try std.testing.expect(std.mem.startsWith(u8, defaultModelFilename(.autoshot), "autoshot."));
+    try std.testing.expect(std.mem.startsWith(u8, defaultModelFilename(.transnetv2), "transnetv2."));
+}
+
+test "parse segment rejects invalid numeric options" {
+    try std.testing.expectError(error.InvalidRuns, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--weights",
+        "models/autoshot.safetensors",
+        "--runs",
+        "0",
+    }));
+
+    try std.testing.expectError(error.InvalidThreshold, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--weights",
+        "models/autoshot.safetensors",
+        "--threshold",
+        "1.1",
+    }));
+
+    try std.testing.expectError(error.InvalidFormat, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--format",
+        "nope",
+    }));
+
+    try std.testing.expectError(error.InvalidModel, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--model",
+        "unknown",
+    }));
+}
+
+test "parse segment rejects duplicate and unknown options" {
+    try std.testing.expectError(error.DuplicateOption, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--weights",
+        "one.safetensors",
+        "--weights",
+        "two.safetensors",
+    }));
+
+    try std.testing.expectError(error.UnknownOption, parseCli(std.testing.allocator, &.{
+        "segment",
+        "assets/333.mp4",
+        "--weights",
+        "models/autoshot.safetensors",
+        "--unknown",
+        "value",
+    }));
+}
+
+test "imported module tests are reachable" {
+    std.testing.refAllDecls(runtime_segment);
+    std.testing.refAllDecls(segment_core);
+    std.testing.refAllDecls(video);
+}

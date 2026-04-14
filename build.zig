@@ -55,7 +55,19 @@ pub fn build(b: *std.Build) void {
     addRuntimeLink(exe.root_module, platform_runtime);
     if (runtimeBuildStep(platform_runtime)) |s| exe.step.dependOn(s);
 
+    const dev_exe = b.addExecutable(.{
+        .name = "shot-boundary-dev",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dev_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    dev_exe.root_module.addImport("clap", clap_dep.module("clap"));
+    dev_exe.root_module.addImport("spec", spec_module);
+
     b.installArtifact(exe);
+    b.installArtifact(dev_exe);
     installModelArtifacts(b, target_os);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -66,6 +78,14 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the application");
     run_step.dependOn(&run_cmd.step);
+
+    const run_dev_cmd = b.addRunArtifact(dev_exe);
+    if (b.args) |args| {
+        run_dev_cmd.addArgs(args);
+    }
+
+    const run_dev_step = b.step("run-dev", "Run the development and benchmark tools");
+    run_dev_step.dependOn(&run_dev_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
     const exe_tests = b.addTest(.{
@@ -81,6 +101,17 @@ pub fn build(b: *std.Build) void {
     addRuntimeLink(exe_tests.root_module, platform_runtime);
     if (runtimeBuildStep(platform_runtime)) |s| exe_tests.step.dependOn(s);
     test_step.dependOn(&b.addRunArtifact(exe_tests).step);
+
+    const dev_exe_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dev_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    dev_exe_tests.root_module.addImport("clap", clap_dep.module("clap"));
+    dev_exe_tests.root_module.addImport("spec", spec_module);
+    test_step.dependOn(&b.addRunArtifact(dev_exe_tests).step);
 
     const fmt_step = b.step("fmt", "Check code formatting");
     const fmt_check = b.addFmt(.{ .paths = &.{ "src", "build.zig", "build.zig.zon" }, .check = true });

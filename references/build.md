@@ -5,6 +5,7 @@
 ```bash
 zig build          # fetch platform runtime dependency + compile
 zig build run      # build and run the application
+zig build run-dev  # build and run development/benchmark tools
 zig build test     # fmt + lint + unit tests
 zig build setup    # fetch/build the platform runtime dependency
 ```
@@ -88,6 +89,7 @@ zig build -Dmlx-c-prefix=/path/to/install -Dmlx-c-build-dir=/path/to/build
 |------|-------|-------|
 | `zig build` | ORT setup + compile | MLX-C setup + compile |
 | `zig build run` | ORT setup + run | MLX-C setup + run |
+| `zig build run-dev` | run `shot-boundary-dev` tools | run `shot-boundary-dev` tools |
 | `zig build test` | fmt + lint + tests | fmt + lint + tests |
 | `zig build fmt` | format check | format check |
 | `zig build lint` | ziglint | ziglint |
@@ -100,7 +102,7 @@ GitHub Actions builds Linux CLI release archives for:
 - `x86_64-linux-gnu`
 - `aarch64-linux-gnu`
 
-The release archive includes `bin/shot-boundary`, ONNX Runtime shared libraries under `lib/`, and ONNX Runtime notices under `third_party/onnxruntime/`. The executable is linked with `$ORIGIN/../lib` rpath so the bundled libraries are found after unpacking.
+The release archive includes `bin/shot-boundary`, ONNX Runtime shared libraries under `lib/`, and ONNX Runtime notices under `third_party/onnxruntime/`. Development tools such as `shot-boundary-dev` are source-build artifacts and are not packaged into Linux releases. The executable is linked with `$ORIGIN/../lib` rpath so the bundled libraries are found after unpacking.
 
 Versioning is tag-first:
 - Pushing a tag like `v0.1.0` builds both Linux archives and publishes a GitHub Release with those assets.

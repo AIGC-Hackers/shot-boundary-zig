@@ -34,7 +34,7 @@ git lfs pull
 zig build -Doptimize=ReleaseFast
 ```
 
-The binary is at `zig-out/bin/shot-boundary`; model files are at `zig-out/models/`.
+The user-facing binary is at `zig-out/bin/shot-boundary`; development and benchmark tools are at `zig-out/bin/shot-boundary-dev`; model files are at `zig-out/models/`.
 
 ## Usage
 
@@ -64,11 +64,14 @@ shot-boundary segment <video> [options]
   --runs <n>                      Repeat n times for benchmarking (default: 1)
 ```
 
-### Other commands
+### Development commands
+
+Source builds also install a separate development CLI:
 
 ```sh
-shot-boundary env               # Print runtime environment (Zig version, OS, arch)
-shot-boundary decode-smoke <v>  # Benchmark raw video decode throughput
+shot-boundary-dev env               # Print runtime environment (Zig version, OS, arch)
+shot-boundary-dev decode-smoke <v>  # Smoke-test raw video decoding
+shot-boundary-dev bench-decode <v>  # Alias for raw decode benchmarking
 ```
 
 ## Platform support
