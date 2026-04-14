@@ -264,7 +264,7 @@ fn setupOrt(b: *std.Build, target_arch: std.Target.Cpu.Arch, enable_cuda: bool) 
         .{ ort_root_dir, archive_path, archive_url, archive_path },
     );
     const verify_cmd = b.fmt(
-        "printf '%s  %s\\n' '{s}' '{s}' | sha256sum -c -",
+        "printf '%s  %s\\n' '{s}' '{s}' | sha256sum --status -c -",
         .{ release.sha256, archive_path },
     );
     const unpack_cmd = b.fmt(

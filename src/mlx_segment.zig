@@ -91,11 +91,16 @@ pub fn segmentFrames(
     errdefer allocator.free(scenes);
     const postprocess_ms = elapsedMs(postprocess_started_at);
 
+    const single_frame_output = try single_frame.toOwnedSlice(allocator);
+    errdefer allocator.free(single_frame_output);
+    const many_hot_output = try many_hot.toOwnedSlice(allocator);
+    errdefer allocator.free(many_hot_output);
+
     return .{
         .frame_count = frame_count,
         .predictions = .{
-            .single_frame = try single_frame.toOwnedSlice(allocator),
-            .many_hot = try many_hot.toOwnedSlice(allocator),
+            .single_frame = single_frame_output,
+            .many_hot = many_hot_output,
         },
         .scenes = scenes,
         .timings = .{

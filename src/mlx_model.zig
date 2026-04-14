@@ -164,9 +164,13 @@ pub const TransNetV2 = struct {
         const output = try self.forward(allocator, inputs, window_batch_rgb24, batch_size);
         defer output.deinit();
 
+        const single_frame = try centerProbabilities(allocator, output.single_frame_logits, self.stream);
+        errdefer allocator.free(single_frame);
+        const many_hot = try centerProbabilities(allocator, output.many_hot_logits, self.stream);
+
         return .{
-            .single_frame = try centerProbabilities(allocator, output.single_frame_logits, self.stream),
-            .many_hot = try centerProbabilities(allocator, output.many_hot_logits, self.stream),
+            .single_frame = single_frame,
+            .many_hot = many_hot,
         };
     }
 
@@ -223,9 +227,13 @@ pub const TransNetV2 = struct {
         const hidden = try relu(fc, self.stream);
         defer freeArray(hidden);
 
+        const single_frame_logits = try self.cls_layer1.forward(hidden, self.stream);
+        errdefer freeArray(single_frame_logits);
+        const many_hot_logits = try self.cls_layer2.forward(hidden, self.stream);
+
         return .{
-            .single_frame_logits = try self.cls_layer1.forward(hidden, self.stream),
-            .many_hot_logits = try self.cls_layer2.forward(hidden, self.stream),
+            .single_frame_logits = single_frame_logits,
+            .many_hot_logits = many_hot_logits,
         };
     }
 };
@@ -357,9 +365,6 @@ const DilatedDdcnn = struct {
     fn forward(self: *const DilatedDdcnn, inputs: c.mlx_array, stream: c.mlx_stream) !c.mlx_array {
         var conv_outputs: [4]c.mlx_array = undefined;
         var initialized: usize = 0;
-        errdefer {
-            for (conv_outputs[0..initialized]) |array| freeArray(array);
-        }
         defer {
             for (conv_outputs[0..initialized]) |array| freeArray(array);
         }
@@ -568,9 +573,6 @@ const FrameSimilarity = struct {
     fn forward(self: *const FrameSimilarity, inputs: []const c.mlx_array, stream: c.mlx_stream) !c.mlx_array {
         var pooled: [layers]c.mlx_array = undefined;
         var initialized: usize = 0;
-        errdefer {
-            for (pooled[0..initialized]) |array| freeArray(array);
-        }
         defer {
             for (pooled[0..initialized]) |array| freeArray(array);
         }
