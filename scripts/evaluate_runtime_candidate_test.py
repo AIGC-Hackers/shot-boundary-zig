@@ -102,16 +102,16 @@ class RuntimeCandidateTest(unittest.TestCase):
     def write_outputs(
         self,
         python_output: dict,
-        baseline_rust_output: dict,
+        baseline_output: dict,
         candidate_output: dict,
     ) -> dict:
         paths = {
             "python_output": self.temp_dir / "python.json",
-            "baseline_rust": self.temp_dir / "baseline-rust.json",
+            "baseline": self.temp_dir / "baseline.json",
             "candidate": self.temp_dir / "candidate.json",
         }
         paths["python_output"].write_text(json.dumps(python_output))
-        paths["baseline_rust"].write_text(json.dumps(baseline_rust_output))
+        paths["baseline"].write_text(json.dumps(baseline_output))
         paths["candidate"].write_text(json.dumps(candidate_output))
         return paths
 

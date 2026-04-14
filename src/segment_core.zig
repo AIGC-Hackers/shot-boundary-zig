@@ -1,4 +1,4 @@
-//! Pure segment-domain transformations shared by future backends.
+//! Pure segment-domain transformations shared by platform runtimes.
 
 const std = @import("std");
 const spec = @import("spec.zig");

@@ -24,7 +24,6 @@ const usage =
     \\segment options:
     \\  --weights <path>             required safetensors path
     \\  --format <json|txt>          output format, default json
-    \\  --backend <auto|mlx|candle>  parsed for Rust CLI parity, default auto
     \\  --threshold <0..1>           scene threshold, default 0.5
     \\  --runs <n>                   run count, must be > 0, default 1
     \\  --max-frames <n>             optional decode limit, must be > 0
@@ -42,10 +41,8 @@ const CliError = error{
     DuplicateOption,
     UnknownOption,
     UnexpectedArgument,
-    UnsupportedBackend,
     UnsupportedProfile,
     InvalidFormat,
-    InvalidBackend,
     InvalidRuns,
     InvalidMaxFrames,
     InvalidWindowBatchSize,
@@ -68,21 +65,10 @@ pub const OutputFormat = enum {
     }
 };
 
-pub const SegmentBackend = enum {
-    auto,
-    mlx,
-    candle,
-
-    pub fn jsonStringify(self: SegmentBackend, jw: *std.json.Stringify) std.json.Stringify.Error!void {
-        try jw.write(@tagName(self));
-    }
-};
-
 const SegmentOptions = struct {
     video: []const u8,
     weights: []const u8,
     format: OutputFormat = .json,
-    backend: SegmentBackend = .auto,
     threshold: f32 = default_scene_threshold,
     runs: usize = 1,
     max_frames: ?usize = null,
@@ -116,7 +102,6 @@ const segment_params = clap.parseParamsComptime(
     \\-h, --help                   Display this help and exit.
     \\    --weights <str>...       Required safetensors path.
     \\    --format <format>...     Output format: json or txt.
-    \\    --backend <backend>...   Parsed for Rust CLI parity: auto, mlx, or candle.
     \\    --threshold <f32>...     Scene threshold in [0, 1].
     \\    --runs <usize>...        Run count, must be > 0.
     \\    --max-frames <usize>...  Optional decode limit, must be > 0.
@@ -130,7 +115,6 @@ const segment_params = clap.parseParamsComptime(
 const segment_parsers = .{
     .str = clap.parsers.string,
     .format = clap.parsers.enumeration(OutputFormat),
-    .backend = clap.parsers.enumeration(SegmentBackend),
     .f32 = clap.parsers.float(f32),
     .usize = clap.parsers.int(usize, 10),
     .video = clap.parsers.string,
@@ -367,7 +351,6 @@ fn parseSegmentCommand(allocator: std.mem.Allocator, args: []const []const u8) C
     const video_path = res.positionals[0] orelse return error.MissingVideo;
     const weights = (try singleOptional([]const u8, res.args.weights)) orelse return error.MissingWeights;
     const format = (try singleOptional(OutputFormat, res.args.format)) orelse OutputFormat.json;
-    const backend = (try singleOptional(SegmentBackend, res.args.backend)) orelse SegmentBackend.auto;
     const threshold = try thresholdOption(res.args.threshold);
     const runs = try positiveUsizeOption(res.args.runs, 1, error.InvalidRuns);
     const max_frames = try positiveOptionalUsizeOption(@field(res.args, "max-frames"), error.InvalidMaxFrames);
@@ -383,7 +366,6 @@ fn parseSegmentCommand(allocator: std.mem.Allocator, args: []const []const u8) C
             .video = video_path,
             .weights = weights,
             .format = format,
-            .backend = backend,
             .threshold = threshold,
             .runs = runs,
             .max_frames = max_frames,
@@ -443,12 +425,7 @@ fn mapSegmentClapError(err: anyerror, diag: clap.Diagnostic) CliError {
             error.UnknownOption
         else
             error.UnexpectedArgument,
-        error.NameNotPartOfEnum => if (diagLongName(diag, "format"))
-            error.InvalidFormat
-        else if (diagLongName(diag, "backend"))
-            error.InvalidBackend
-        else
-            error.UnexpectedArgument,
+        error.NameNotPartOfEnum => if (diagLongName(diag, "format")) error.InvalidFormat else error.UnexpectedArgument,
         error.InvalidCharacter, error.Overflow => if (diagLongName(diag, "threshold"))
             error.InvalidThreshold
         else if (diagLongName(diag, "runs"))
@@ -469,7 +446,6 @@ fn diagLongName(diag: clap.Diagnostic, expected: []const u8) bool {
 }
 
 fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
-    if (options.backend == .candle) return writeRuntimeCliError(error.UnsupportedBackend);
     if (options.profile) return writeRuntimeCliError(error.UnsupportedProfile);
 
     const window_batch_size = options.window_batch_size orelse mlx_segment.default_window_batch_size;
@@ -650,10 +626,8 @@ fn cliErrorMessage(err: CliError) []const u8 {
         error.DuplicateOption => "duplicate option",
         error.UnknownOption => "unknown option",
         error.UnexpectedArgument => "unexpected positional argument",
-        error.UnsupportedBackend => "Zig segment currently supports only backend auto/mlx",
-        error.UnsupportedProfile => "Zig MLX backend does not support --profile yet",
+        error.UnsupportedProfile => "runtime profiling is not supported yet",
         error.InvalidFormat => "format must be json or txt",
-        error.InvalidBackend => "backend must be auto, mlx, or candle",
         error.InvalidRuns => "runs must be a positive integer",
         error.InvalidMaxFrames => "max-frames must be a positive integer",
         error.InvalidWindowBatchSize => "window-batch-size must be a positive integer",
@@ -688,11 +662,10 @@ test "parse segment command from README shape" {
     try std.testing.expectEqualStrings("target/models/transnetv2.safetensors", options.weights);
     try std.testing.expectEqual(@as(usize, 5), options.runs);
     try std.testing.expectEqual(OutputFormat.json, options.format);
-    try std.testing.expectEqual(SegmentBackend.auto, options.backend);
     try std.testing.expectEqual(default_scene_threshold, options.threshold);
 }
 
-test "parse segment accepts Rust CLI parity options" {
+test "parse segment accepts runtime options" {
     const command = try parseCli(std.testing.allocator, &.{
         "segment",
         "assets/333.mp4",
@@ -700,8 +673,6 @@ test "parse segment accepts Rust CLI parity options" {
         "target/models/transnetv2.safetensors",
         "--format",
         "txt",
-        "--backend",
-        "mlx",
         "--threshold",
         "0.35",
         "--runs",
@@ -715,7 +686,6 @@ test "parse segment accepts Rust CLI parity options" {
 
     const options = command.segment;
     try std.testing.expectEqual(OutputFormat.txt, options.format);
-    try std.testing.expectEqual(SegmentBackend.mlx, options.backend);
     try std.testing.expectEqual(@as(f32, 0.35), options.threshold);
     try std.testing.expectEqual(@as(usize, 2), options.runs);
     try std.testing.expectEqual(@as(?usize, 100), options.max_frames);

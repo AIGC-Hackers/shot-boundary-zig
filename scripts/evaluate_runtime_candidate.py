@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a TransNetV2 runtime/backend candidate against local baselines."""
+"""Evaluate a TransNetV2 platform runtime candidate against local baselines."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--python", dest="python_output", type=Path, required=True)
-    parser.add_argument("--baseline-rust", type=Path, required=True)
+    parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-name", default="candidate")
     parser.add_argument("--output-json", type=Path, required=True)
@@ -116,14 +116,14 @@ def correctness_report(
 
 def performance_report(
     python_output: dict[str, Any],
-    baseline_rust_output: dict[str, Any],
+    baseline_output: dict[str, Any],
     candidate_output: dict[str, Any],
     min_speedup_over_baseline: float,
     min_speedup_over_python: float,
     require_python_fps: bool,
 ) -> dict[str, Any]:
     python_fps = mean_fps(python_output)
-    baseline_fps = mean_fps(baseline_rust_output)
+    baseline_fps = mean_fps(baseline_output)
     candidate_fps = mean_fps(candidate_output)
     baseline_gate_fps = baseline_fps * min_speedup_over_baseline
     python_gate_fps = python_fps * min_speedup_over_python
@@ -140,7 +140,7 @@ def performance_report(
         "passed": not reasons,
         "require_python_fps": require_python_fps,
         "python_mean_fps": python_fps,
-        "baseline_rust_mean_fps": baseline_fps,
+        "baseline_mean_fps": baseline_fps,
         "candidate_mean_fps": candidate_fps,
         "candidate_vs_baseline_speedup": ratio(candidate_fps, baseline_fps),
         "candidate_vs_python_speedup": ratio(candidate_fps, python_fps),
@@ -154,12 +154,12 @@ def performance_report(
 
 def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     python_output = load(args.python_output)
-    baseline_rust_output = load(args.baseline_rust)
+    baseline_output = load(args.baseline)
     candidate_output = load(args.candidate)
     correctness = correctness_report(python_output, candidate_output, args.prediction_threshold)
     performance = performance_report(
         python_output,
-        baseline_rust_output,
+        baseline_output,
         candidate_output,
         args.min_speedup_over_baseline,
         args.min_speedup_over_python,
@@ -167,7 +167,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     )
     passed = correctness["passed"] and performance["passed"]
     recommendation = (
-        "candidate is eligible for backend replacement"
+        "candidate is eligible for runtime replacement"
         if passed
         else "keep the current default path and continue runtime/kernel work"
     )
@@ -182,7 +182,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         },
         "inputs": {
             "python": str(args.python_output),
-            "baseline_rust": str(args.baseline_rust),
+            "baseline": str(args.baseline),
             "candidate": str(args.candidate),
         },
         "correctness": correctness,
@@ -190,7 +190,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "recommendation": recommendation,
         "environments": {
             "python": python_output.get("environment"),
-            "baseline_rust": baseline_rust_output.get("environment"),
+            "baseline": baseline_output.get("environment"),
             "candidate": candidate_output.get("environment"),
         },
     }
@@ -220,7 +220,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- Passed: `{performance['passed']}`",
         f"- Python mean FPS: `{performance['python_mean_fps']}`",
-        f"- Baseline Rust mean FPS: `{performance['baseline_rust_mean_fps']}`",
+        f"- Baseline mean FPS: `{performance['baseline_mean_fps']}`",
         f"- Candidate mean FPS: `{performance['candidate_mean_fps']}`",
         f"- Candidate vs baseline speedup: `{performance['candidate_vs_baseline_speedup']}`",
         f"- Candidate vs Python speedup: `{performance['candidate_vs_python_speedup']}`",
