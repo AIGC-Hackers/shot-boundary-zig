@@ -68,10 +68,44 @@ AutoShot-only batch size 2 on the same 8 windows was slower:
 
 The current `target/models/transnetv2.onnx` failed under Python ONNX Runtime with batch size 2 in `ScatterElements`, so the directly comparable speed number is batch size 1.
 
+### Linux 2 vCPU-like Check
+
+Simulated the constrained Linux Docker target with `taskset -c 0,1` on the local machine.
+
+Zig end-to-end segment on 200 decoded frames:
+
+| Window batch | Inference ms | Total ms | FPS |
+|---:|---:|---:|---:|
+| 1 | 1320.124 | 1712.966 | 116.757 |
+| 2 | 2555.521 | 2943.645 | 67.943 |
+| 4 | 1922.410 | 2308.908 | 86.621 |
+
+Python ONNX Runtime microbench on the first 4 windows showed the same shape. Keeping ONNX Runtime's default `intra_op_num_threads = 0` was faster than hard-setting `1` or `2`, even under the 2-CPU affinity:
+
+| Window batch | Intra threads | Effective FPS |
+|---:|---:|---:|
+| 1 | 0 | 205.812 |
+| 1 | 1 | 60.558 |
+| 1 | 2 | 67.144 |
+| 2 | 0 | 106.061 |
+| 4 | 0 | 137.119 |
+
+Graph optimization level was not a meaningful lever on this exported graph with batch size 1 and ORT default threading:
+
+| Graph optimization | Effective FPS |
+|---|---:|
+| ORT_DISABLE_ALL | 204.786 |
+| ORT_ENABLE_BASIC | 205.632 |
+| ORT_ENABLE_EXTENDED | 205.725 |
+| ORT_ENABLE_ALL | 205.454 |
+
+Action taken: Linux now defaults to `--window-batch-size 1`; macOS keeps the previous runtime default because this check only covers ONNX CPU.
+
 ## Decision
 
 AutoShot accuracy is confirmed higher, but speed is not confirmed higher on the current CPU ONNX backend. We are proceeding with the full implementation because the accuracy gain is the deciding factor:
 
 - Proceed with AutoShot as the default model direction.
 - Do not switch solely on the expectation that AutoShot is faster in our ONNX Runtime CPU path.
-- Before a full transition, rerun speed on the intended release hardware and optionally test ORT graph optimization / CUDA separately.
+- Treat ONNX Runtime graph optimization and manual intra-op thread tuning as exhausted for the 2 vCPU CPU path unless new hardware data contradicts this check.
+- Further CPU speed work should focus on model-level changes such as quantization or graph/model simplification, with an accuracy gate.

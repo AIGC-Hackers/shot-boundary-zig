@@ -116,7 +116,7 @@ indices = indices.reshape((num_samples, m)).transpose(0, 1).tolist()
 output = params[indices]
 ```
 
-这会让 TorchScript ONNX export 把索引 trace 成常量。用 batch=1 dummy 直接导出的模型, batch=1 可以跑, 但当前 CLI 默认 `--window-batch-size 2` 会在 ORT 中失败, 典型错误是 `color_hist_layer` reshape 试图把 batch=1 的 gather 结果 reshape 成 batch=2。
+这会让 TorchScript ONNX export 把索引 trace 成常量。用 batch=1 dummy 直接导出的模型, batch=1 可以跑, 但历史 Linux CLI 默认 `--window-batch-size 2` 会在 ORT 中失败, 典型错误是 `color_hist_layer` reshape 试图把 batch=1 的 gather 结果 reshape 成 batch=2。
 
 可行修复是在导出脚本中不要使用这个 `gather_nd`, 改为 ONNX-friendly 的 `torch.gather`:
 
@@ -168,5 +168,5 @@ AutoShot 上游 SHOT F1 最优阈值记录为 `0.296`。在决定以精度收益
 ### 推荐下一步
 
 1. 用 `scripts/export_autoshot_onnx.py` 导出并固定 release 用 ONNX artifact。
-2. 用 `assets/333.mp4 --window-batch-size 2` 跑 Zig ONNX segment smoke。
+2. 用 `assets/333.mp4` 跑 Zig ONNX segment smoke; Linux ONNX 默认走 2 vCPU 下更快的 `--window-batch-size 1`。
 3. 后续如要追速度, 再单独评估 ORT graph optimization / CUDA, 不阻塞 AutoShot 精度迁移。

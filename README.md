@@ -33,7 +33,6 @@ uv run --with torch --with einops --with numpy --with onnx --with onnxruntime \
 
 zig build -Doptimize=ReleaseFast run -- segment assets/333.mp4 \
   --weights target/models/autoshot.onnx \
-  --window-batch-size 2 \
   --runs 3 \
   --max-frames 20 \
   --format json > target/zig-onnx-cpu-segment-runs3-max20.json

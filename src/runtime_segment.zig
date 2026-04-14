@@ -1,11 +1,15 @@
 //! Platform runtime-backed segmentation orchestration.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const runtime_model = @import("runtime_model.zig");
 const segment_core = @import("segment_core.zig");
 const spec = @import("spec");
 
-pub const default_window_batch_size = 2;
+pub const default_window_batch_size: usize = switch (builtin.target.os.tag) {
+    .macos => 2,
+    else => 1,
+};
 
 pub const SegmentOptions = struct {
     threshold: f32 = spec.default_scene_threshold,
