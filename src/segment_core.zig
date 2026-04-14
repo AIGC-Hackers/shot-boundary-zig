@@ -1,7 +1,7 @@
 //! Pure segment-domain transformations shared by platform runtimes.
 
 const std = @import("std");
-const spec = @import("spec.zig");
+const spec = @import("spec");
 
 pub const Scene = struct {
     start: usize,

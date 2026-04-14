@@ -1,7 +1,7 @@
 //! Video effect edge backed by the ffmpeg CLI.
 
 const std = @import("std");
-const spec = @import("spec.zig");
+const spec = @import("spec");
 
 pub const DecodeOptions = struct {
     target_width: usize = spec.input_width,

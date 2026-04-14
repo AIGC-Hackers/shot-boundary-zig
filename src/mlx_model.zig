@@ -1,7 +1,7 @@
 //! MLX-C TransNetV2 model edge.
 
 const std = @import("std");
-const spec = @import("spec.zig");
+const spec = @import("spec");
 
 const c = @cImport({
     @cInclude("mlx/c/mlx.h");
@@ -16,6 +16,8 @@ const similarity_dim = 128;
 const aux_output_dim = 128;
 const batch_norm_eps: f32 = 1e-3;
 const hist_bins = 512;
+
+pub const implementation: []const u8 = "zig-mlx";
 
 pub const MlxModelError = error{
     MlxCallFailed,

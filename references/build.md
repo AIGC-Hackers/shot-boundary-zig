@@ -3,15 +3,50 @@
 ## Quick Start
 
 ```bash
-zig build          # fetch MLX-C (if needed) + compile
+zig build          # fetch platform runtime dependency + compile
 zig build run      # build and run the application
 zig build test     # fmt + lint + unit tests
-zig build mlx-smoke  # MLX-C link/execution smoke test
+zig build setup    # fetch/build the platform runtime dependency
 ```
 
-## MLX-C Dependency
+On macOS, `zig build mlx-smoke` is also available. Linux builds do not create MLX targets.
 
-MLX-C is a C wrapper around Apple's MLX framework. It is fetched and built automatically via CMake on first `zig build`.
+## Platform Runtime Selection
+
+The runtime is selected by compile target:
+
+| Target OS | Runtime | Model path |
+|-----------|---------|------------|
+| macOS | MLX-C | `.safetensors` |
+| Linux | ONNX Runtime | `.onnx` |
+
+There is no CLI backend flag.
+
+## Linux ONNX Runtime
+
+Linux builds use ONNX Runtime v1.24.4. By default the build downloads the CPU package for the target architecture into gitignored `externals/onnxruntime/`; currently `x86_64` and `aarch64` Linux CPU packages are wired.
+
+```bash
+zig build -Doptimize=ReleaseFast
+```
+
+To point at a prebuilt ORT prefix:
+
+```bash
+zig build -Donnxruntime-prefix=/path/to/onnxruntime
+```
+
+CUDA EP is intentionally not part of the default Linux target because it currently fails the prediction gate for the exported TransNetV2 graph. To opt into the x86_64 CUDA EP while investigating CUDA graph differences:
+
+```bash
+zig build -Doptimize=ReleaseFast -Donnxruntime-cuda=true
+```
+
+CUDA EP requires the matching CUDA/cuDNN runtime libraries on `LD_LIBRARY_PATH` or installed in the system loader path. Do not hard-code host-specific CUDA library paths in source.
+
+## macOS MLX-C Dependency
+
+MLX-C is a C wrapper around Apple's MLX framework. It is fetched and built automatically via CMake on first macOS `zig build`.
 
 Each external stage has an artifact guard:
 - fetch is skipped when `externals/mlx-c/src/.git` exists
@@ -22,34 +57,8 @@ Each external stage has an artifact guard:
 ### Dependency chain
 
 ```
-transnetv2_zig (Zig) → MLX-C v0.6.0 (C++, CMake) → MLX v0.31.1 (C++, Metal shaders)
+transnetv2_zig (Zig) -> MLX-C v0.6.0 (C++, CMake) -> MLX v0.31.1
 ```
-
-CMake is required on the host because MLX compiles Metal shaders and links Accelerate/Metal frameworks — this cannot be replicated in Zig's build system.
-
-### Directory layout
-
-```
-externals/
-  mlx-c/
-    src/       # git clone target (shallow, pinned to mlx_c_version)
-    build/     # cmake build artifacts (includes MLX as _deps/mlx-build/)
-    install/   # cmake install prefix (headers + libmlxc.dylib)
-```
-
-`externals/` is gitignored. It is created automatically and can be deleted to force a clean rebuild.
-
-### Build steps (DAG)
-
-```
-fetch (git clone)
-  → configure (cmake -S ... -B ...)
-    → cmake_build (cmake --build)
-      → install (cmake --install)
-        → exe / exe_tests / mlx_smoke (zig compile + link)
-```
-
-Steps that don't link MLX-C (`fmt`, `lint`) do not trigger any of this.
 
 ### Overriding with pre-built MLX-C
 
@@ -57,40 +66,35 @@ Steps that don't link MLX-C (`fmt`, `lint`) do not trigger any of this.
 zig build -Dmlx-c-prefix=/path/to/install -Dmlx-c-build-dir=/path/to/build
 ```
 
-When either `-D` option is provided, the automatic fetch/cmake steps are skipped entirely. Both paths must point to a completed CMake build+install of MLX-C.
-
-- `mlx-c-prefix`: directory containing `include/` and `lib/` (cmake install prefix)
-- `mlx-c-build-dir`: cmake build directory (needed for `_deps/mlx-build/libmlx.dylib`)
-
-### Linking details (`addMlxLink`)
-
-Each compile artifact that uses MLX-C gets:
-- Include path: `{prefix}/include`
-- Library paths: `{prefix}/lib`, `{build-dir}`, `{build-dir}/_deps/mlx-build`
-- RPATHs: same as library paths (for runtime dylib resolution)
-- System libraries: `c++`, `mlxc`, `mlx`
-
-## Other Dependencies (via build.zig.zon)
+## Other Dependencies
 
 | Dependency | Purpose | Version |
 |------------|---------|---------|
 | `clap` | CLI argument parsing | 0.11.0 |
 | `ziglint` | Zig linter | 0.5.2 |
 
-These are standard Zig packages fetched and cached automatically by the build system.
-
 ## Build Steps
 
-| Step | Description | Triggers CMake? |
-|------|-------------|-----------------|
-| `zig build` | Compile and install the main executable | Yes |
-| `zig build run` | Build and run with `-- args` | Yes |
-| `zig build test` | Format check + lint + unit tests | Yes |
-| `zig build fmt` | Check `zig fmt` compliance | No |
-| `zig build lint` | Run ziglint | No |
-| `zig build mlx-smoke` | MLX-C integration smoke test | Yes |
-| `zig build setup` | Only fetch and build MLX-C | Yes |
+| Step | Linux | macOS |
+|------|-------|-------|
+| `zig build` | ORT setup + compile | MLX-C setup + compile |
+| `zig build run` | ORT setup + run | MLX-C setup + run |
+| `zig build test` | fmt + lint + tests | fmt + lint + tests |
+| `zig build fmt` | format check | format check |
+| `zig build lint` | ziglint | ziglint |
+| `zig build mlx-smoke` | unavailable | MLX-C smoke test |
+| `zig build setup` | ORT setup | MLX-C setup |
 
-## Versioning
+## Linux Release Artifacts
 
-The MLX-C version is pinned in `build.zig` as `const mlx_c_version`. The transitive MLX version is pinned inside MLX-C's `CMakeLists.txt` (`GIT_TAG v0.31.1`). To upgrade, update the constant and delete `externals/`.
+GitHub Actions builds Linux CLI release archives for:
+- `x86_64-linux-gnu`
+- `aarch64-linux-gnu`
+
+The release archive includes `bin/transnetv2_zig`, ONNX Runtime shared libraries under `lib/`, and ONNX Runtime notices under `third_party/onnxruntime/`. The executable is linked with `$ORIGIN/../lib` rpath so the bundled libraries are found after unpacking.
+
+Versioning is tag-first:
+- Pushing a tag like `v0.1.0` builds both Linux archives and publishes a GitHub Release with those assets.
+- Manual `workflow_dispatch` builds artifacts without publishing a release. If the optional `version` input is empty, artifact names use `YYYYMMDD-shortsha`.
+
+macOS release artifacts are intentionally not wired in GitHub Actions yet; that path should be confirmed separately because the MLX-C/MLX stack depends on Apple's macOS toolchain and Metal environment.

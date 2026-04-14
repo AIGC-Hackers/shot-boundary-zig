@@ -1,7 +1,7 @@
-//! MLX-backed segmentation orchestration.
+//! Platform runtime-backed segmentation orchestration.
 
 const std = @import("std");
-const mlx_model = @import("mlx_model.zig");
+const runtime_model = @import("runtime_model.zig");
 const segment_core = @import("segment_core.zig");
 const spec = @import("spec");
 
@@ -43,7 +43,7 @@ pub const SegmentFramesReport = struct {
 
 pub fn segmentFrames(
     allocator: std.mem.Allocator,
-    model: *const mlx_model.TransNetV2,
+    model: *const runtime_model.TransNetV2,
     frames_rgb24: []const u8,
     options: SegmentOptions,
 ) !SegmentFramesReport {

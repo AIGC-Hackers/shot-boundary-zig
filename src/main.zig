@@ -3,10 +3,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const clap = @import("clap");
-const mlx_model = @import("mlx_model.zig");
-const mlx_segment = @import("mlx_segment.zig");
+const runtime_model = @import("runtime_model.zig");
+const runtime_segment = @import("runtime_segment.zig");
 const segment_core = @import("segment_core.zig");
-const spec = @import("spec.zig");
+const spec = @import("spec");
 const video = @import("video.zig");
 
 const default_scene_threshold: f32 = spec.default_scene_threshold;
@@ -22,7 +22,7 @@ const usage =
     \\  --max-frames <n>             optional decode limit, must be > 0
     \\
     \\segment options:
-    \\  --weights <path>             required safetensors path
+    \\  --weights <path>             required platform model path (.onnx on Linux, safetensors on macOS)
     \\  --format <json|txt>          output format, default json
     \\  --threshold <0..1>           scene threshold, default 0.5
     \\  --runs <n>                   run count, must be > 0, default 1
@@ -100,7 +100,7 @@ const decode_smoke_parsers = .{
 
 const segment_params = clap.parseParamsComptime(
     \\-h, --help                   Display this help and exit.
-    \\    --weights <str>...       Required safetensors path.
+    \\    --weights <str>...       Required platform model path.
     \\    --format <format>...     Output format: json or txt.
     \\    --threshold <f32>...     Scene threshold in [0, 1].
     \\    --runs <usize>...        Run count, must be > 0.
@@ -254,7 +254,7 @@ const SegmentSummary = struct {
 };
 
 const SegmentCliOutput = struct {
-    implementation: []const u8 = "zig-mlx",
+    implementation: []const u8 = runtime_model.implementation,
     video: []const u8,
     weights: []const u8,
     threshold: f32,
@@ -448,7 +448,7 @@ fn diagLongName(diag: clap.Diagnostic, expected: []const u8) bool {
 fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
     if (options.profile) return writeRuntimeCliError(error.UnsupportedProfile);
 
-    const window_batch_size = options.window_batch_size orelse mlx_segment.default_window_batch_size;
+    const window_batch_size = options.window_batch_size orelse runtime_segment.default_window_batch_size;
     var runs: std.ArrayList(SegmentRunOutput) = .empty;
     defer {
         for (runs.items) |run| run.deinit(allocator);
@@ -457,14 +457,14 @@ fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
 
     for (0..options.runs) |run_index| {
         const load_started_at = try std.time.Instant.now();
-        var model = try mlx_model.TransNetV2.load(allocator, options.weights);
+        var model = try runtime_model.TransNetV2.load(allocator, options.weights);
         defer model.deinit();
         const load_model_ms = elapsedMs(load_started_at);
 
         const decoded = try video.decodeRgb24(allocator, options.video, .{ .max_frames = options.max_frames });
         defer decoded.deinit(allocator);
 
-        const report = try mlx_segment.segmentFrames(allocator, &model, decoded.data, .{
+        const report = try runtime_segment.segmentFrames(allocator, &model, decoded.data, .{
             .threshold = options.threshold,
             .window_batch_size = window_batch_size,
         });
@@ -757,7 +757,7 @@ test "parse decode-smoke accepts ffmpeg edge options" {
 }
 
 test "imported module tests are reachable" {
-    std.testing.refAllDecls(mlx_segment);
+    std.testing.refAllDecls(runtime_segment);
     std.testing.refAllDecls(segment_core);
     std.testing.refAllDecls(video);
 }
