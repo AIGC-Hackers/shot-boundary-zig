@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ZIG_TARBALL_URL: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+  ZIG_TARBALL_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
 
 defaults:
   run:
@@ -29,11 +30,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          cache-key: linux-test
+      - name: Install Zig
+        run: |
+          mkdir -p .local/zig
+          curl -fsSL "${ZIG_TARBALL_URL}" -o .local/zig.tar.xz
+          printf '%s  %s\n' "${ZIG_TARBALL_SHA256}" .local/zig.tar.xz | sha256sum -c -
+          tar -xf .local/zig.tar.xz -C .local/zig --strip-components=1
+          echo "${PWD}/.local/zig" >> "${GITHUB_PATH}"
 
       - name: Run tests
         run: zig build test
@@ -56,11 +59,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          cache-key: ${{ matrix.target }}
+      - name: Install Zig
+        run: |
+          mkdir -p .local/zig
+          curl -fsSL "${ZIG_TARBALL_URL}" -o .local/zig.tar.xz
+          printf '%s  %s\n' "${ZIG_TARBALL_SHA256}" .local/zig.tar.xz | sha256sum -c -
+          tar -xf .local/zig.tar.xz -C .local/zig --strip-components=1
+          echo "${PWD}/.local/zig" >> "${GITHUB_PATH}"
 
       - name: Compute version
         id: meta
