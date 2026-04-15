@@ -73,23 +73,20 @@ const DecodeSmokeOutput = struct {
     environment: EnvironmentOutput,
 };
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     const command = parseCli(allocator, args[1..]) catch |err| {
-        try writeCliError(err);
+        try writeCliError(io, err);
         std.process.exit(2);
     };
 
     switch (command) {
-        .decode_smoke => |options| try runDecodeSmoke(allocator, options),
-        .environment => try cli_common.writeJson(EnvCommandOutput{ .environment = .current() }),
-        .help => try writeUsage(),
+        .decode_smoke => |options| try runDecodeSmoke(io, allocator, options),
+        .environment => try cli_common.writeJson(io, EnvCommandOutput{ .environment = .current() }),
+        .help => try writeUsage(io),
     }
 }
 
@@ -175,8 +172,8 @@ fn diagLongName(diag: clap.Diagnostic, expected: []const u8) bool {
     return std.mem.eql(u8, actual, expected);
 }
 
-fn runDecodeSmoke(allocator: std.mem.Allocator, options: DecodeSmokeOptions) !void {
-    const report = try video.decodeReport(allocator, options.video, .{ .max_frames = options.max_frames });
+fn runDecodeSmoke(io: std.Io, allocator: std.mem.Allocator, options: DecodeSmokeOptions) !void {
+    const report = try video.decodeReport(io, allocator, options.video, .{ .max_frames = options.max_frames });
     defer allocator.free(report.checksum_fnv1a64);
     const output: DecodeSmokeOutput = .{
         .report = report,
@@ -184,14 +181,14 @@ fn runDecodeSmoke(allocator: std.mem.Allocator, options: DecodeSmokeOptions) !vo
     };
 
     switch (options.format) {
-        .json => try cli_common.writeJson(output),
-        .txt => try writeDecodeSmokeText(output),
+        .json => try cli_common.writeJson(io, output),
+        .txt => try writeDecodeSmokeText(io, output),
     }
 }
 
-fn writeDecodeSmokeText(output: DecodeSmokeOutput) !void {
+fn writeDecodeSmokeText(io: std.Io, output: DecodeSmokeOutput) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_writer.interface;
 
     try stdout.print("implementation: {s}\n", .{output.implementation});
@@ -204,17 +201,17 @@ fn writeDecodeSmokeText(output: DecodeSmokeOutput) !void {
     try stdout.flush();
 }
 
-fn writeUsage() !void {
+fn writeUsage(io: std.Io) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
 
     try stdout_writer.interface.writeAll(usage);
     try stdout_writer.interface.flush();
 }
 
-fn writeCliError(err: CliError) !void {
+fn writeCliError(io: std.Io, err: CliError) !void {
     var stderr_buf: [4096]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_writer.interface;
 
     try stderr.print("error: {s}\n\n", .{cliErrorMessage(err)});

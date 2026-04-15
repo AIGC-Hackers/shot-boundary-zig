@@ -3,9 +3,7 @@
 const std = @import("std");
 const spec = @import("spec");
 
-const c = @cImport({
-    @cInclude("mlx/c/mlx.h");
-});
+const c = @import("c");
 
 const base_filters = 16;
 const layer_count = 6;

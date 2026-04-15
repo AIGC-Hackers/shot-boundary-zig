@@ -1,5 +1,4 @@
 const std = @import("std");
-const ziglint = @import("ziglint");
 
 const mlx_c_version = "v0.6.0";
 const mlx_c_root_dir = "externals/mlx-c";
@@ -118,11 +117,6 @@ pub fn build(b: *std.Build) void {
     fmt_step.dependOn(&fmt_check.step);
     test_step.dependOn(fmt_step);
 
-    const lint_step = b.step("lint", "Run ziglint");
-    const ziglint_dep = b.dependency("ziglint", .{ .optimize = .ReleaseFast });
-    lint_step.dependOn(ziglint.addLint(b, ziglint_dep, &.{ b.path("src"), b.path("build.zig") }));
-    test_step.dependOn(lint_step);
-
     switch (platform_runtime) {
         .mlx => |mlx| {
             const mlx_smoke = b.addExecutable(.{
@@ -134,6 +128,7 @@ pub fn build(b: *std.Build) void {
                 }),
             });
             addMlxLink(mlx_smoke.root_module, mlx.paths);
+            mlx_smoke.root_module.addImport("c", createMlxCModule(b, target, optimize, mlx));
             if (mlx.build_step) |s| mlx_smoke.step.dependOn(s);
 
             const mlx_smoke_run = b.addRunArtifact(mlx_smoke);
@@ -174,7 +169,10 @@ fn installModelFile(b: *std.Build, filename: []const u8) void {
 
 fn installModelFileIfPresent(b: *std.Build, filename: []const u8) void {
     const source = b.pathJoin(&.{ "models", filename });
-    std.fs.cwd().access(source, .{}) catch return;
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().access(io, source, .{}) catch return;
     b.installFile(source, b.pathJoin(&.{ "models", filename }));
 }
 
@@ -234,8 +232,47 @@ fn createRuntimeModule(
     });
     module.addImport("spec", spec_module);
     module.addOptions("runtime_options", runtime_options);
+    switch (runtime) {
+        .mlx => |mlx| module.addImport("c", createMlxCModule(b, target, optimize, mlx)),
+        .ort => |ort| module.addImport("c", createOrtCModule(b, target, optimize, ort)),
+        .unsupported => {},
+    }
     addRuntimeLink(module, runtime);
     return module;
+}
+
+fn createMlxCModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    mlx: MlxSetup,
+) *std.Build.Module {
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/mlx_c.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    translate_c.addIncludePath(lazyPath(b, mlx.paths.include_dir));
+    if (mlx.build_step) |s| translate_c.step.dependOn(s);
+    return translate_c.createModule();
+}
+
+fn createOrtCModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    ort: OrtSetup,
+) *std.Build.Module {
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/onnxruntime_c.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    translate_c.addIncludePath(lazyPath(b, ort.paths.include_dir));
+    if (ort.build_step) |s| translate_c.step.dependOn(s);
+    return translate_c.createModule();
 }
 
 fn setupMlx(b: *std.Build) MlxSetup {

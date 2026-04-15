@@ -4,9 +4,7 @@ const std = @import("std");
 const runtime_options = @import("runtime_options");
 const spec = @import("spec");
 
-const c = @cImport({
-    @cInclude("onnxruntime_c_api.h");
-});
+const c = @import("c");
 
 const input_name = "frames";
 const output_single_frame_name = "single_frame";

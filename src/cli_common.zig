@@ -30,9 +30,9 @@ pub const EnvironmentOutput = struct {
     }
 };
 
-pub fn writeJson(value: anytype) !void {
+pub fn writeJson(io: std.Io, value: anytype) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
 
     var jw: std.json.Stringify = .{
         .writer = &stdout_writer.interface,

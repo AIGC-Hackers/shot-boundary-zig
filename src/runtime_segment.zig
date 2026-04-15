@@ -46,6 +46,7 @@ pub const SegmentFramesReport = struct {
 };
 
 pub fn segmentFrames(
+    io: std.Io,
     allocator: std.mem.Allocator,
     model: anytype,
     frames_rgb24: []const u8,
@@ -55,7 +56,7 @@ pub fn segmentFrames(
     if (frames_rgb24.len % spec.frameBytes() != 0) return error.InvalidInput;
     if (options.window_batch_size == 0) return error.InvalidInput;
 
-    const started_at = try std.time.Instant.now();
+    const started_at = std.Io.Clock.awake.now(io);
     const frame_count = frames_rgb24.len / spec.frameBytes();
     const windows = try segment_core.windowSourceIndices(allocator, frame_count);
     defer allocator.free(windows);
@@ -72,17 +73,17 @@ pub fn segmentFrames(
         const batch_end = @min(window_index + options.window_batch_size, windows.len);
         const batch = windows[window_index..batch_end];
 
-        const window_started_at = try std.time.Instant.now();
+        const window_started_at = std.Io.Clock.awake.now(io);
         const window_data = try buildWindowBatch(allocator, frames_rgb24, batch);
         defer allocator.free(window_data);
-        windowing_ms += time_util.elapsedMs(window_started_at);
+        windowing_ms += time_util.elapsedMs(window_started_at, io);
 
-        const inference_started_at = try std.time.Instant.now();
+        const inference_started_at = std.Io.Clock.awake.now(io);
         const predictions = try model.predictBatch(allocator, window_data, batch.len);
         defer predictions.deinit(allocator);
         try single_frame.appendSlice(allocator, predictions.single_frame);
         try many_hot.appendSlice(allocator, predictions.many_hot);
-        inference_ms += time_util.elapsedMs(inference_started_at);
+        inference_ms += time_util.elapsedMs(inference_started_at, io);
 
         window_index = batch_end;
     }
@@ -90,10 +91,10 @@ pub fn segmentFrames(
     single_frame.shrinkRetainingCapacity(frame_count);
     many_hot.shrinkRetainingCapacity(frame_count);
 
-    const postprocess_started_at = try std.time.Instant.now();
+    const postprocess_started_at = std.Io.Clock.awake.now(io);
     const scenes = try segment_core.predictionsToScenes(allocator, single_frame.items, options.threshold);
     errdefer allocator.free(scenes);
-    const postprocess_ms = time_util.elapsedMs(postprocess_started_at);
+    const postprocess_ms = time_util.elapsedMs(postprocess_started_at, io);
 
     const single_frame_output = try single_frame.toOwnedSlice(allocator);
     errdefer allocator.free(single_frame_output);
@@ -111,7 +112,7 @@ pub fn segmentFrames(
             .windowing_ms = windowing_ms,
             .inference_ms = inference_ms,
             .postprocess_ms = postprocess_ms,
-            .total_ms = time_util.elapsedMs(started_at),
+            .total_ms = time_util.elapsedMs(started_at, io),
         },
     };
 }

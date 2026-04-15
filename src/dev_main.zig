@@ -3,8 +3,8 @@
 const std = @import("std");
 const dev_cli = @import("dev_cli.zig");
 
-pub fn main() !void {
-    try dev_cli.main();
+pub fn main(init: std.process.Init) !void {
+    try dev_cli.main(init);
 }
 
 test "imported module tests are reachable" {

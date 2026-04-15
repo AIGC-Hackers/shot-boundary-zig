@@ -110,7 +110,7 @@ docs/           AutoShot architecture reference
 ### Tests
 
 ```sh
-zig build test   # unit tests + format check + lint
+zig build test   # unit tests + format check
 ```
 
 ### Re-exporting model artifacts

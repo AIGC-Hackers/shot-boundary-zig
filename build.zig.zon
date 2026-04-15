@@ -3,13 +3,10 @@
     .version = "0.0.0",
     .fingerprint = 0xec2d58be3e29586e,
     .dependencies = .{
-        .ziglint = .{
-            .url = "https://github.com/rockorager/ziglint/archive/refs/tags/v0.5.2.tar.gz",
-            .hash = "ziglint-0.5.2-t0bwL2FwBQC5i-ifhKKv2ls5jGXHShJpuNhFVhiU-Tt-",
-        },
+        // Follow clap master for Zig 0.16 compatibility; this is only a CLI parsing edge.
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
-            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+            .url = "git+https://github.com/Hejsil/zig-clap#fc1e5cc3f6d9d3001112385ee6256d694e959d2f",
+            .hash = "clap-0.11.0-oBajB7foAQC3Iyn4IVCkUdYaOVVng5IZkSncySTjNig1",
         },
     },
     .paths = .{

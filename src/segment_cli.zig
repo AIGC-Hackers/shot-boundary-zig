@@ -226,22 +226,19 @@ const SegmentCliOutput = struct {
     summary: SegmentSummary,
 };
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     const command = parseCli(allocator, args[1..]) catch |err| {
-        try writeCliError(err);
+        try writeCliError(io, err);
         std.process.exit(2);
     };
 
     switch (command) {
-        .help => try writeUsage(),
-        .segment => |options| try runSegment(allocator, options),
+        .help => try writeUsage(io),
+        .segment => |options| try runSegment(io, allocator, options),
     }
 }
 
@@ -371,20 +368,21 @@ fn defaultModelFilename(model: SegmentModel) []const u8 {
     return model.defaultFilename();
 }
 
-fn defaultModelPath(allocator: std.mem.Allocator, model: SegmentModel) ![]const u8 {
-    const exe_dir = try std.fs.selfExeDirPathAlloc(allocator);
-    defer allocator.free(exe_dir);
+fn defaultModelPath(io: std.Io, allocator: std.mem.Allocator, model: SegmentModel) ![]const u8 {
+    const exe_path = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(exe_path);
     // Binary lives at {prefix}/bin/; models live at {prefix}/models/.
+    const exe_dir = std.fs.path.dirname(exe_path) orelse ".";
     const prefix_dir = std.fs.path.dirname(exe_dir) orelse exe_dir;
     return std.fs.path.join(allocator, &.{ prefix_dir, "models", defaultModelFilename(model) });
 }
 
-fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
+fn runSegment(io: std.Io, allocator: std.mem.Allocator, options: SegmentOptions) !void {
     const window_batch_size = options.window_batch_size orelse runtime_segment.default_window_batch_size;
     var weights_owned = false;
     const weights = if (options.weights) |path| path else blk: {
         weights_owned = true;
-        break :blk try defaultModelPath(allocator, options.model);
+        break :blk try defaultModelPath(io, allocator, options.model);
     };
     defer if (weights_owned) allocator.free(weights);
 
@@ -398,6 +396,7 @@ fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
         const run = switch (options.model) {
             .autoshot => try runSegmentWithModel(
                 runtime_model.AutoShot,
+                io,
                 allocator,
                 options,
                 weights,
@@ -406,6 +405,7 @@ fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
             ),
             .transnetv2 => try runSegmentWithModel(
                 runtime_model.TransNetV2,
+                io,
                 allocator,
                 options,
                 weights,
@@ -427,28 +427,29 @@ fn runSegment(allocator: std.mem.Allocator, options: SegmentOptions) !void {
     };
 
     switch (options.format) {
-        .json => try cli_common.writeJson(output),
-        .txt => try writeSegmentText(output),
+        .json => try cli_common.writeJson(io, output),
+        .txt => try writeSegmentText(io, output),
     }
 }
 
 fn runSegmentWithModel(
     comptime Model: type,
+    io: std.Io,
     allocator: std.mem.Allocator,
     options: SegmentOptions,
     weights: []const u8,
     run_index: usize,
     window_batch_size: usize,
 ) !SegmentRunOutput {
-    const load_started_at = try std.time.Instant.now();
+    const load_started_at = std.Io.Clock.awake.now(io);
     var model = try Model.load(allocator, weights);
     defer model.deinit();
-    const load_model_ms = time_util.elapsedMs(load_started_at);
+    const load_model_ms = time_util.elapsedMs(load_started_at, io);
 
-    const decoded = try video.decodeRgb24(allocator, options.video, .{ .max_frames = options.max_frames });
+    const decoded = try video.decodeRgb24(io, allocator, options.video, .{ .max_frames = options.max_frames });
     defer decoded.deinit(allocator);
 
-    const report = try runtime_segment.segmentFrames(allocator, &model, decoded.data, .{
+    const report = try runtime_segment.segmentFrames(io, allocator, &model, decoded.data, .{
         .threshold = options.threshold,
         .window_batch_size = window_batch_size,
     });
@@ -493,9 +494,9 @@ fn runSegmentWithModel(
     return run;
 }
 
-fn writeSegmentText(output: SegmentCliOutput) !void {
+fn writeSegmentText(io: std.Io, output: SegmentCliOutput) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_writer.interface;
     const last_run = output.runs[output.runs.len - 1];
 
@@ -526,17 +527,17 @@ fn writeSegmentText(output: SegmentCliOutput) !void {
     try stdout.flush();
 }
 
-fn writeUsage() !void {
+fn writeUsage(io: std.Io) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
 
     try stdout_writer.interface.writeAll(usage);
     try stdout_writer.interface.flush();
 }
 
-fn writeCliError(err: CliError) !void {
+fn writeCliError(io: std.Io, err: CliError) !void {
     var stderr_buf: [4096]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_writer.interface;
 
     try stderr.print("error: {s}\n\n", .{cliErrorMessage(err)});

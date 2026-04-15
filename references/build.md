@@ -6,7 +6,7 @@
 zig build          # fetch platform runtime dependency + compile
 zig build run      # build and run the application
 zig build run-dev  # build and run development/benchmark tools
-zig build test     # fmt + lint + unit tests
+zig build test     # fmt + unit tests
 zig build setup    # fetch/build the platform runtime dependency
 ```
 
@@ -80,8 +80,7 @@ zig build -Dmlx-c-prefix=/path/to/install -Dmlx-c-build-dir=/path/to/build
 
 | Dependency | Purpose | Version |
 |------------|---------|---------|
-| `clap` | CLI argument parsing | 0.11.0 |
-| `ziglint` | Zig linter | 0.5.2 |
+| `clap` | CLI argument parsing | master commit `fc1e5cc` |
 
 ## Build Steps
 
@@ -90,9 +89,8 @@ zig build -Dmlx-c-prefix=/path/to/install -Dmlx-c-build-dir=/path/to/build
 | `zig build` | ORT setup + compile | MLX-C setup + compile |
 | `zig build run` | ORT setup + run | MLX-C setup + run |
 | `zig build run-dev` | run `shot-boundary-dev` tools | run `shot-boundary-dev` tools |
-| `zig build test` | fmt + lint + tests | fmt + lint + tests |
+| `zig build test` | fmt + tests | fmt + tests |
 | `zig build fmt` | format check | format check |
-| `zig build lint` | ziglint | ziglint |
 | `zig build mlx-smoke` | unavailable | MLX-C smoke test |
 | `zig build setup` | ORT setup | MLX-C setup |
 

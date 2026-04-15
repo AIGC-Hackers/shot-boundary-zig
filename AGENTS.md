@@ -34,7 +34,7 @@ try map.put(allocator, "key", 42);
 **stdout/stderr writer:**
 ```zig
 var buf: [4096]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 defer writer.interface.flush() catch {};
 try writer.interface.print("hello {s}\n", .{"world"});
 ```
@@ -54,7 +54,7 @@ b.addExecutable(.{
 **JSON writing:**
 ```zig
 var buf: [4096]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 defer writer.interface.flush() catch {};
 
 var jw: std.json.Stringify = .{

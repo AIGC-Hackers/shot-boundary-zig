@@ -3,8 +3,8 @@
 const std = @import("std");
 const segment_cli = @import("segment_cli.zig");
 
-pub fn main() !void {
-    try segment_cli.main();
+pub fn main(init: std.process.Init) !void {
+    try segment_cli.main(init);
 }
 
 test "imported module tests are reachable" {

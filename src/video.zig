@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const spec = @import("spec");
+const time_util = @import("time_util.zig");
 
 pub const DecodeOptions = struct {
     target_width: usize = spec.input_width,
@@ -50,8 +51,8 @@ pub const DecodeError = error{
     InvalidRawVideoLength,
 };
 
-pub fn decodeReport(allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) !DecodeReport {
-    const decoded = try decodeRgb24(allocator, path, options);
+pub fn decodeReport(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) !DecodeReport {
+    const decoded = try decodeRgb24(io, allocator, path, options);
     defer decoded.deinit(allocator);
 
     const frame_count = decoded.frameCount();
@@ -72,11 +73,11 @@ pub fn decodeReport(allocator: std.mem.Allocator, path: []const u8, options: Dec
     };
 }
 
-pub fn decodeRgb24(allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) !DecodedVideo {
+pub fn decodeRgb24(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) !DecodedVideo {
     if (options.target_width == 0 or options.target_height == 0) return error.InvalidTargetSize;
 
-    const started_at = try std.time.Instant.now();
-    const raw = try runFfmpegRawVideo(allocator, path, options);
+    const started_at = std.Io.Clock.awake.now(io);
+    const raw = try runFfmpegRawVideo(io, allocator, path, options);
     errdefer allocator.free(raw);
 
     const frame_bytes = options.target_width * options.target_height * spec.input_channels;
@@ -89,12 +90,12 @@ pub fn decodeRgb24(allocator: std.mem.Allocator, path: []const u8, options: Deco
         .target_height = options.target_height,
         .data = raw,
         .checksum_fnv1a64 = formatFnv1a64(fnv1a64(raw)),
-        .elapsed_ms = @as(f64, @floatFromInt((try std.time.Instant.now()).since(started_at))) / std.time.ns_per_ms,
+        .elapsed_ms = time_util.elapsedMs(started_at, io),
         .limited_by_max_frames = if (options.max_frames) |max_frames| frame_count >= max_frames else false,
     };
 }
 
-fn runFfmpegRawVideo(allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) ![]u8 {
+fn runFfmpegRawVideo(io: std.Io, allocator: std.mem.Allocator, path: []const u8, options: DecodeOptions) ![]u8 {
     var dimensions_buf: [32]u8 = undefined;
     var dimensions_writer: std.Io.Writer = .fixed(&dimensions_buf);
     try dimensions_writer.print("{d}x{d}", .{ options.target_width, options.target_height });
@@ -137,10 +138,9 @@ fn runFfmpegRawVideo(allocator: std.mem.Allocator, path: []const u8, options: De
         "-",
     };
 
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+    const result = try std.process.run(allocator, io, .{
         .argv = argv,
-        .max_output_bytes = 512 * 1024 * 1024,
+        .stdout_limit = .limited(512 * 1024 * 1024),
     });
     errdefer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
@@ -154,7 +154,7 @@ fn runFfmpegRawVideo(allocator: std.mem.Allocator, path: []const u8, options: De
 
 fn childExitedSuccessfully(term: std.process.Child.Term) bool {
     return switch (term) {
-        .Exited => |code| code == 0,
+        .exited => |code| code == 0,
         else => false,
     };
 }
