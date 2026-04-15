@@ -8,3 +8,6 @@ __pycache__/
 *.safetensors
 *.pth
 *.pb
+.agents/
+.claude/
+skills-lock.json
