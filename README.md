@@ -25,7 +25,7 @@ Set `SHOT_BOUNDARY_HOME` to change the install directory.
 
 ### Build from source
 
-Prerequisites: [Zig 0.15.2](https://ziglang.org/download/). On macOS, CMake is also needed (MLX-C is fetched and built automatically).
+Prerequisites: [Zig 0.16.0](https://ziglang.org/download/0.16.0/). On macOS, CMake is also needed (MLX-C is fetched and built automatically).
 
 ```sh
 git clone https://github.com/AIGC-Hackers/shot-boundary-zig.git
