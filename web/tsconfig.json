@@ -5,7 +5,7 @@
     { "path": "./tsconfig.node.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
+    // TS7 removed baseUrl; keep aliases relative to the config root instead.
     "paths": {
       "@/*": ["./src/*"]
     }

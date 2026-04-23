@@ -23,7 +23,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "baseUrl": ".",
+    // TS7 removed baseUrl; keep aliases relative to the config root instead.
     "paths": {
       "@/*": ["./src/*"]
     }
