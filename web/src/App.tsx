@@ -3,20 +3,22 @@ import { ActivityIcon, FilmIcon, PlayIcon, ScissorsIcon, UploadIcon } from "luci
 
 import { Button } from "@/components/ui/button"
 import { EditorTimeline, type TimelineMarker } from "@/components/editor-timeline"
-import { modelSpec } from "@/lib/shot-boundary/model-spec"
 import {
+  chooseThumbnailCount,
+  configureDefaultWasmRuntime,
   loadModel,
+  modelSpec,
   segmentFrames,
   type Backend,
   type ModelSource,
   type SegmentResult,
-} from "@/lib/shot-boundary/onnx-runtime"
+} from "@/shot-boundary"
 import {
   decodeVideoToRgb24,
   generateTimelineThumbnails,
   type DecodedFrames,
   type TimelineThumbnail,
-} from "@/lib/shot-boundary/video-decode"
+} from "@/shot-boundary"
 
 type StatusKind = "idle" | "working" | "done" | "error"
 
@@ -99,6 +101,7 @@ export function App() {
     setStatus("Loading model...")
 
     try {
+      configureDefaultWasmRuntime()
       const loadedModel = await loadModel(readModelSource(modelFile, modelUrl), backend)
       setStatus("Running deterministic smoke window...")
       const frameCount = modelSpec.windowFrames
@@ -139,6 +142,7 @@ export function App() {
     setStatus("Loading model...")
 
     try {
+      configureDefaultWasmRuntime()
       const loadedModel = await loadModel(readModelSource(modelFile, modelUrl), backend)
 
       setStatus("Decoding video frames with Mediabunny...")
@@ -481,10 +485,6 @@ function makeTimelineMarkers(result: SegmentResult, decoded: DecodedFrames): Tim
       timeSeconds,
     }
   })
-}
-
-function chooseThumbnailCount(frameCount: number): number {
-  return Math.max(6, Math.min(18, Math.ceil(frameCount / 25)))
 }
 
 function makeJsonOutput(result: SegmentResult | null, summary: RunSummary | null, decoded: DecodedFrames | null) {

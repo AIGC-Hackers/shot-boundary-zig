@@ -6,8 +6,8 @@ export const modelSpec = {
   contextFrames: 25,
   outputFramesPerWindow: 50,
   transnetV2SceneThreshold: 0.02,
-} as const;
+} as const
 
 export function frameBytes(): number {
-  return modelSpec.inputWidth * modelSpec.inputHeight * modelSpec.inputChannels;
+  return modelSpec.inputWidth * modelSpec.inputHeight * modelSpec.inputChannels
 }
