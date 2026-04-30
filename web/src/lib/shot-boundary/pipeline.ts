@@ -69,6 +69,8 @@ export type AnalyzeVideoResult = {
 export async function analyzeVideo(
   options: AnalyzeVideoOptions
 ): Promise<AnalyzeVideoResult> {
+  let loadedModel: Awaited<ReturnType<typeof loadModel>> | null = null
+
   try {
     if (options.wasm !== undefined) {
       configureWasmRuntime(options.wasm)
@@ -78,7 +80,7 @@ export async function analyzeVideo(
     const modelSource = await resolveModelSource(options.model, options.onEvent)
 
     options.onEvent?.({ kind: "model-load-started" })
-    const loadedModel = await loadModel(
+    loadedModel = await loadModel(
       modelSource.source,
       options.backend ?? "wasm"
     )
@@ -140,6 +142,10 @@ export async function analyzeVideo(
     const error = cause instanceof Error ? cause : new Error(String(cause))
     options.onEvent?.({ kind: "error", error })
     throw error
+  } finally {
+    if (loadedModel !== null) {
+      await loadedModel.session.release()
+    }
   }
 }
 

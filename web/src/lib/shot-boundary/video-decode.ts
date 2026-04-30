@@ -222,9 +222,13 @@ async function canvasToObjectUrl(
   canvas: HTMLCanvasElement | OffscreenCanvas
 ): Promise<string> {
   const blob =
+    typeof HTMLCanvasElement !== "undefined" &&
     canvas instanceof HTMLCanvasElement
       ? await htmlCanvasToBlob(canvas)
-      : await canvas.convertToBlob({ type: "image/jpeg", quality: 0.78 })
+      : await (canvas as OffscreenCanvas).convertToBlob({
+          type: "image/jpeg",
+          quality: 0.78,
+        })
 
   return URL.createObjectURL(blob)
 }

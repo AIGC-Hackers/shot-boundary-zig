@@ -135,21 +135,27 @@ export async function segmentFrames(
       modelSpec.inputWidth,
       modelSpec.inputChannels,
     ])
+    let outputs: ort.InferenceSession.ReturnType | null = null
 
-    const inferenceStartedAt = performance.now()
-    const outputs = await loadedModel.session.run({ frames: input })
-    inferenceMs += performance.now() - inferenceStartedAt
+    try {
+      const inferenceStartedAt = performance.now()
+      outputs = await loadedModel.session.run({ frames: input })
+      inferenceMs += performance.now() - inferenceStartedAt
 
-    const expectedBatchLength = batch.length * modelSpec.outputFramesPerWindow
-    singleFrame.set(
-      readFloatOutput(outputs, "single_frame", expectedBatchLength),
-      outputCursor
-    )
-    manyHot.set(
-      readFloatOutput(outputs, "many_hot", expectedBatchLength),
-      outputCursor
-    )
-    outputCursor += expectedBatchLength
+      const expectedBatchLength = batch.length * modelSpec.outputFramesPerWindow
+      singleFrame.set(
+        readFloatOutput(outputs, "single_frame", expectedBatchLength),
+        outputCursor
+      )
+      manyHot.set(
+        readFloatOutput(outputs, "many_hot", expectedBatchLength),
+        outputCursor
+      )
+      outputCursor += expectedBatchLength
+    } finally {
+      input.dispose()
+      disposeOutputs(outputs)
+    }
   }
 
   const postprocessStartedAt = performance.now()
@@ -191,6 +197,14 @@ function readFloatOutput(
   }
 
   return output.data
+}
+
+function disposeOutputs(outputs: ort.InferenceSession.ReturnType | null): void {
+  if (outputs === null) return
+
+  for (const output of Object.values(outputs)) {
+    output.dispose()
+  }
 }
 
 function toUint8Array(value: ArrayBuffer | Uint8Array): Uint8Array {
