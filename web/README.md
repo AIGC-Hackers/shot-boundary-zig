@@ -5,7 +5,7 @@ Browser prototype for TransNetV2 shot-boundary detection.
 The same codebase also builds a package-only tree for GitHub tag dependencies. The package exposes browser helpers for:
 
 - configuring ONNX Runtime Web wasm asset URLs,
-- downloading and caching a model from a caller-provided CDN URL,
+- downloading and caching the default model from a package-owned URL,
 - reporting typed pipeline events that downstream apps can render as UI state,
 - decoding video frames, running inference, and producing scene boundaries.
 
@@ -40,32 +40,33 @@ Install from a package tag:
 ```json
 {
   "dependencies": {
-    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.1"
+    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.2"
   }
 }
 ```
 
-Use a model URL hosted by the consuming app or a CDN:
+Use the package-owned defaults:
 
 ```ts
-import { analyzeVideo, createWasmRuntimeOptions } from "@ethan-huo/shot-boundary-web";
+import {
+  analyzeVideo,
+  createDefaultShotBoundaryAssets,
+} from "@ethan-huo/shot-boundary-web"
+
+const assets = createDefaultShotBoundaryAssets()
 
 const analysis = await analyzeVideo({
-  model: {
-    kind: "download",
-    url: "https://cdn.example.com/models/transnetv2.onnx",
-    cacheName: "shot-boundary-models",
-  },
+  model: assets.model,
   video: file,
   maxFrames: 150,
-  wasm: createWasmRuntimeOptions("/vendor/shot-boundary/ort-wasm/"),
+  wasm: assets.wasmRuntime,
   onEvent: (event) => {
     // Render event.kind and progress payloads in the host app.
   },
-});
+})
 ```
 
-The package tag includes `assets/ort-wasm/` so the host app can copy those files to its own public/CDN path. Model files are intentionally not bundled; pass their URL through `model.kind === "download"` or use `file`, `url`, or `bytes` model sources directly.
+The default wasm URLs use the package tag on jsDelivr and intentionally point only at `ort-wasm-simd-threaded.{mjs,wasm}`, because jsDelivr's GitHub endpoint rejects the larger ONNX Runtime variants. The default model URL points at `assets/models/transnetv2.onnx` in the same package tag through GitHub's media endpoint. For private deployments, pass overrides to `createDefaultShotBoundaryAssets({ wasmBaseUrl, modelUrl })`, or provide `file`, `url`, or `bytes` model sources directly.
 
 ## Pipeline
 

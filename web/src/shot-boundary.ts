@@ -1,8 +1,12 @@
 export { frameBytes, modelSpec } from "./lib/shot-boundary/model-spec"
 export {
   type DownloadModelOptions,
+  type DownloadModelInput,
   type DownloadedModel,
   type ModelDownloadProgress,
+  type ShotBoundaryAssetOptions,
+  type ShotBoundaryAssets,
+  createDefaultShotBoundaryAssets,
   downloadModel,
 } from "./lib/shot-boundary/model-assets"
 export {

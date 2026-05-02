@@ -63,12 +63,17 @@ export function configureDefaultWasmRuntime(assetBaseUrl = "/ort-wasm/"): void {
 }
 
 export function createWasmRuntimeOptions(
-  assetBaseUrl = "/ort-wasm/"
+  assetBaseUrl = "/ort-wasm/",
+  options: { numThreads?: number } = {}
 ): Required<WasmRuntimeOptions> {
   const baseUrl = assetBaseUrl.endsWith("/") ? assetBaseUrl : `${assetBaseUrl}/`
   return {
-    wasmPaths: { wasm: `${baseUrl}ort-wasm-simd-threaded.jsep.wasm` },
-    numThreads: 1,
+    wasmPaths: {
+      mjs: `${baseUrl}ort-wasm-simd-threaded.mjs`,
+      wasm: `${baseUrl}ort-wasm-simd-threaded.wasm`,
+    },
+    // The default CDN path deliberately avoids ORT's oversized JSEP/asyncify variants.
+    numThreads: options.numThreads ?? 1,
   }
 }
 

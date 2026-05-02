@@ -1,6 +1,7 @@
 import { modelSpec } from "./model-spec"
 import {
   type DownloadedModel,
+  type DownloadModelInput,
   type ModelDownloadProgress,
   downloadModel,
 } from "./model-assets"
@@ -37,15 +38,7 @@ export type ShotBoundaryEvent =
   | { kind: "complete"; result: AnalyzeVideoResult }
   | { kind: "error"; error: Error }
 
-export type ModelInput =
-  | ModelSource
-  | {
-      kind: "download"
-      url: string
-      cacheName?: string
-      cacheKey?: string
-      signal?: AbortSignal
-    }
+export type ModelInput = ModelSource | DownloadModelInput
 
 export type AnalyzeVideoOptions = {
   model: ModelInput
@@ -80,10 +73,7 @@ export async function analyzeVideo(
     const modelSource = await resolveModelSource(options.model, options.onEvent)
 
     options.onEvent?.({ kind: "model-load-started" })
-    loadedModel = await loadModel(
-      modelSource.source,
-      options.backend ?? "wasm"
-    )
+    loadedModel = await loadModel(modelSource.source, options.backend ?? "wasm")
     options.onEvent?.({
       kind: "model-load-complete",
       loadMs: loadedModel.loadMs,
@@ -166,6 +156,7 @@ async function resolveModelSource(
     url: model.url,
     cacheName: model.cacheName,
     cacheKey: model.cacheKey,
+    cacheTtlMs: model.cacheTtlMs,
     signal: model.signal,
     onProgress: (progress) =>
       onEvent?.({ kind: "model-download-progress", progress }),

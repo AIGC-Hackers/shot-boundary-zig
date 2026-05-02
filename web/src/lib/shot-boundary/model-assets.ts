@@ -1,4 +1,14 @@
-import type { ModelSource } from "./onnx-runtime"
+import {
+  createWasmRuntimeOptions,
+  type ModelSource,
+  type WasmRuntimeOptions,
+} from "./onnx-runtime"
+
+const defaultPackageTag = "web-v0.0.2"
+const defaultAssetOrigin = "AIGC-Hackers/shot-boundary-zig"
+const defaultModelCacheName = "shot-boundary-models"
+const defaultModelCacheTtlMs = 30 * 24 * 60 * 60 * 1000
+const cachedAtHeader = "x-shot-boundary-cached-at"
 
 export type ModelDownloadProgress = {
   loadedBytes: number
@@ -15,8 +25,68 @@ export type DownloadModelOptions = {
   url: string
   cacheName?: string
   cacheKey?: string
+  cacheTtlMs?: number
   signal?: AbortSignal
   onProgress?: (progress: ModelDownloadProgress) => void
+}
+
+export type DownloadModelInput = {
+  kind: "download"
+  url: string
+  cacheName?: string
+  cacheKey?: string
+  cacheTtlMs?: number
+  signal?: AbortSignal
+}
+
+export type ShotBoundaryAssetOptions = {
+  tag?: string
+  origin?: string
+  wasmBaseUrl?: string
+  modelUrl?: string
+  modelCacheName?: string
+  modelCacheKey?: string
+  modelCacheTtlMs?: number
+  wasmNumThreads?: number
+}
+
+export type ShotBoundaryAssets = {
+  tag: string
+  wasmBaseUrl: string
+  modelUrl: string
+  wasmRuntime: Required<WasmRuntimeOptions>
+  model: DownloadModelInput
+}
+
+export function createDefaultShotBoundaryAssets(
+  options: ShotBoundaryAssetOptions = {}
+): ShotBoundaryAssets {
+  const tag = options.tag ?? defaultPackageTag
+  const origin = options.origin ?? defaultAssetOrigin
+  const wasmBaseUrl =
+    options.wasmBaseUrl ??
+    `https://cdn.jsdelivr.net/gh/${origin}@${tag}/assets/ort-wasm/`
+  const modelUrl =
+    options.modelUrl ??
+    `https://media.githubusercontent.com/media/${origin}/${tag}/assets/models/transnetv2.onnx`
+  const modelCacheKey = options.modelCacheKey ?? `${tag}/models/transnetv2.onnx`
+  const modelCacheTtlMs = options.modelCacheTtlMs ?? defaultModelCacheTtlMs
+
+  return {
+    tag,
+    wasmBaseUrl,
+    modelUrl,
+    wasmRuntime: createWasmRuntimeOptions(wasmBaseUrl, {
+      numThreads: options.wasmNumThreads,
+    }),
+    model: {
+      kind: "download",
+      url: modelUrl,
+      cacheName: options.modelCacheName ?? defaultModelCacheName,
+      cacheKey: modelCacheKey,
+      cacheTtlMs: modelCacheTtlMs,
+    },
+  }
 }
 
 export async function downloadModel(
@@ -25,7 +95,9 @@ export async function downloadModel(
   const cache = await openModelCache(options.cacheName)
   const cacheRequest = makeCacheRequest(options.url, options.cacheKey)
   const cachedResponse =
-    cache === null ? undefined : await cache.match(cacheRequest)
+    cache === null
+      ? undefined
+      : await readFreshCachedResponse(cache, cacheRequest, options.cacheTtlMs)
 
   if (cachedResponse !== undefined) {
     const bytes = new Uint8Array(await cachedResponse.arrayBuffer())
@@ -43,10 +115,12 @@ export async function downloadModel(
 
   const bytes = await readResponseBytes(response, options.onProgress)
   if (cache !== null) {
+    const headers = new Headers(response.headers)
+    headers.set(cachedAtHeader, Date.now().toString())
     await cache.put(
       cacheRequest,
       new Response(bytes.slice(), {
-        headers: response.headers,
+        headers,
         status: response.status,
         statusText: response.statusText,
       })
@@ -72,6 +146,28 @@ function makeCacheRequest(url: string, cacheKey: string | undefined): Request {
       ? "https://shot-boundary.local/"
       : location.href
   return new Request(new URL(cacheKey ?? url, baseUrl).toString())
+}
+
+async function readFreshCachedResponse(
+  cache: Cache,
+  cacheRequest: Request,
+  cacheTtlMs: number | undefined
+): Promise<Response | undefined> {
+  const response = await cache.match(cacheRequest)
+  if (response === undefined || cacheTtlMs === undefined) {
+    return response
+  }
+
+  const cachedAt = Number.parseInt(
+    response.headers.get(cachedAtHeader) ?? "",
+    10
+  )
+  if (Number.isFinite(cachedAt) && Date.now() - cachedAt <= cacheTtlMs) {
+    return response
+  }
+
+  await cache.delete(cacheRequest)
+  return undefined
 }
 
 async function readResponseBytes(
