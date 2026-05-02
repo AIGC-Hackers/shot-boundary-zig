@@ -3,11 +3,18 @@ export {
   type DownloadModelOptions,
   type DownloadModelInput,
   type DownloadedModel,
+  type DownloadedWasmRuntimeAsset,
+  type DownloadedWasmRuntimeAssets,
+  type DownloadWasmRuntimeAssetsInput,
+  type DownloadWasmRuntimeAssetsOptions,
   type ModelDownloadProgress,
   type ShotBoundaryAssetOptions,
   type ShotBoundaryAssets,
+  type WasmRuntimeAssetKind,
+  type WasmRuntimeAssetProgress,
   createDefaultShotBoundaryAssets,
   downloadModel,
+  downloadWasmRuntimeAssets,
 } from "./lib/shot-boundary/model-assets"
 export {
   type AnalyzeVideoOptions,

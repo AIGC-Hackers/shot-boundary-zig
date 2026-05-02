@@ -40,7 +40,7 @@ Install from a package tag:
 ```json
 {
   "dependencies": {
-    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.3"
+    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.4"
   }
 }
 ```
@@ -51,22 +51,33 @@ Use the package-owned defaults:
 import {
   analyzeVideo,
   createDefaultShotBoundaryAssets,
+  downloadWasmRuntimeAssets,
 } from "@ethan-huo/shot-boundary-web"
 
 const assets = createDefaultShotBoundaryAssets()
-
-const analysis = await analyzeVideo({
-  model: assets.model,
-  video: file,
-  maxFrames: 150,
-  wasm: assets.wasmRuntime,
-  onEvent: (event) => {
-    // Render event.kind and progress payloads in the host app.
+const wasm = await downloadWasmRuntimeAssets({
+  ...assets.wasmRuntimeAssets,
+  onProgress: (progress) => {
+    // Render progress.asset, progress.loadedBytes, and progress.totalBytes.
   },
 })
+
+try {
+  const analysis = await analyzeVideo({
+    model: assets.model,
+    video: file,
+    maxFrames: 150,
+    wasm: wasm.wasmRuntime,
+    onEvent: (event) => {
+      // Render event.kind and progress payloads in the host app.
+    },
+  })
+} finally {
+  wasm.dispose()
+}
 ```
 
-The default wasm URLs use the package tag on jsDelivr and intentionally point only at `ort-wasm-simd-threaded.{mjs,wasm}`, because jsDelivr's GitHub endpoint rejects the larger ONNX Runtime variants. The default model URL points at `assets/models/transnetv2.onnx` in the same package tag through GitHub's raw file endpoint. For private deployments, pass overrides to `createDefaultShotBoundaryAssets({ wasmBaseUrl, modelUrl })`, or provide `file`, `url`, or `bytes` model sources directly.
+The default wasm URLs use the package tag on jsDelivr and intentionally point only at `ort-wasm-simd-threaded.{mjs,wasm}`, because jsDelivr's GitHub endpoint rejects the larger ONNX Runtime variants. `downloadWasmRuntimeAssets()` downloads those files with byte progress before ONNX Runtime initializes; by default it returns blob-backed runtime URLs so ORT does not need to fetch the large wasm file as an opaque internal step. Use `useObjectUrls: false` when a strict CSP disallows blob module URLs. The default model URL points at `assets/models/transnetv2.onnx` in the same package tag through GitHub's raw file endpoint. For private deployments, pass overrides to `createDefaultShotBoundaryAssets({ wasmBaseUrl, modelUrl })`, or provide `file`, `url`, or `bytes` model sources directly.
 
 ## Pipeline
 
