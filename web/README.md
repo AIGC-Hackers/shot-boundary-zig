@@ -40,7 +40,7 @@ Install from a package tag:
 ```json
 {
   "dependencies": {
-    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.2"
+    "@ethan-huo/shot-boundary-web": "github:ethan-huo/shot-boundary-zig#web-v0.0.3"
   }
 }
 ```
@@ -66,7 +66,7 @@ const analysis = await analyzeVideo({
 })
 ```
 
-The default wasm URLs use the package tag on jsDelivr and intentionally point only at `ort-wasm-simd-threaded.{mjs,wasm}`, because jsDelivr's GitHub endpoint rejects the larger ONNX Runtime variants. The default model URL points at `assets/models/transnetv2.onnx` in the same package tag through GitHub's media endpoint. For private deployments, pass overrides to `createDefaultShotBoundaryAssets({ wasmBaseUrl, modelUrl })`, or provide `file`, `url`, or `bytes` model sources directly.
+The default wasm URLs use the package tag on jsDelivr and intentionally point only at `ort-wasm-simd-threaded.{mjs,wasm}`, because jsDelivr's GitHub endpoint rejects the larger ONNX Runtime variants. The default model URL points at `assets/models/transnetv2.onnx` in the same package tag through GitHub's raw file endpoint. For private deployments, pass overrides to `createDefaultShotBoundaryAssets({ wasmBaseUrl, modelUrl })`, or provide `file`, `url`, or `bytes` model sources directly.
 
 ## Pipeline
 

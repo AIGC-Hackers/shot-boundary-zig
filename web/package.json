@@ -1,7 +1,7 @@
 {
   "name": "@ethan-huo/shot-boundary-web",
   "private": false,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "packageManager": "bun@1.3.13",
   "scripts": {

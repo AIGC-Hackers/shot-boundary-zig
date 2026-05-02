@@ -4,7 +4,7 @@ import {
   type WasmRuntimeOptions,
 } from "./onnx-runtime"
 
-const defaultPackageTag = "web-v0.0.2"
+const defaultPackageTag = "web-v0.0.3"
 const defaultAssetOrigin = "AIGC-Hackers/shot-boundary-zig"
 const defaultModelCacheName = "shot-boundary-models"
 const defaultModelCacheTtlMs = 30 * 24 * 60 * 60 * 1000
@@ -68,7 +68,7 @@ export function createDefaultShotBoundaryAssets(
     `https://cdn.jsdelivr.net/gh/${origin}@${tag}/assets/ort-wasm/`
   const modelUrl =
     options.modelUrl ??
-    `https://media.githubusercontent.com/media/${origin}/${tag}/assets/models/transnetv2.onnx`
+    `https://raw.githubusercontent.com/${origin}/${tag}/assets/models/transnetv2.onnx`
   const modelCacheKey = options.modelCacheKey ?? `${tag}/models/transnetv2.onnx`
   const modelCacheTtlMs = options.modelCacheTtlMs ?? defaultModelCacheTtlMs
 

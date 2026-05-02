@@ -11,7 +11,7 @@ test("default package assets are versioned with package.json", () => {
     `https://cdn.jsdelivr.net/gh/AIGC-Hackers/shot-boundary-zig@${expectedTag}/assets/ort-wasm/`
   )
   expect(assets.modelUrl).toBe(
-    `https://media.githubusercontent.com/media/AIGC-Hackers/shot-boundary-zig/${expectedTag}/assets/models/transnetv2.onnx`
+    `https://raw.githubusercontent.com/AIGC-Hackers/shot-boundary-zig/${expectedTag}/assets/models/transnetv2.onnx`
   )
   expect(assets.model.cacheName).toBe("shot-boundary-models")
   expect(assets.model.cacheKey).toBe(`${expectedTag}/models/transnetv2.onnx`)
